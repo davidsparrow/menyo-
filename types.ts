@@ -20,6 +20,15 @@ export interface IntegrationStatus {
   twilio: boolean;
 }
 
+export type BookingPreference = 'HUMAN_SUPPORT' | 'GLORIA_FOODS' | 'CUSTOM';
+
+export interface Policies {
+  dietaryRestrictions: string;
+  kidsZone: string;
+  accessibility: string;
+  largeParties: string; // e.g., "For parties over 8, please call..."
+}
+
 export interface RestaurantProfile {
   id: string;
   info: BusinessInfo;
@@ -28,6 +37,13 @@ export interface RestaurantProfile {
   voiceId: string; // Gemini voice name
   phoneNumber: string | null;
   gloriaFoodsToken?: string;
+  
+  // New Knowledge Base Fields
+  bookingPreference: BookingPreference;
+  customBookingUrl?: string;
+  humanSupportPhone?: string;
+  policies: Policies;
+  editableSystemPrompt: string; // The final source of truth for the bot
 }
 
 export enum VoiceOption {

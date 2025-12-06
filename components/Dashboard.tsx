@@ -36,7 +36,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ profile }) => {
 
       const client = await geminiService.connectLive(
         profile.voiceId as any,
-        `Restaurant Info: ${JSON.stringify(profile.info)}. \n\n Menu Data: ${profile.menuContext}`,
+        profile.editableSystemPrompt, // Use the finalized edited prompt
         (buffer) => {
              // Simple visualizer hook
              const data = buffer.getChannelData(0);

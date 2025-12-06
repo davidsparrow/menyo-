@@ -99,7 +99,7 @@ export class GeminiService {
   // 2. Live API Connection
   async connectLive(
     voiceName: VoiceOption,
-    systemContext: string,
+    systemInstruction: string, // Full prompt passed from App state
     onAudioData: (buffer: AudioBuffer) => void,
     onClose: () => void
   ): Promise<{ disconnect: () => void; sendAudio: (data: Float32Array) => void }> {
@@ -116,16 +116,7 @@ export class GeminiService {
         speechConfig: {
           voiceConfig: { prebuiltVoiceConfig: { voiceName: voiceName } },
         },
-        systemInstruction: `You are a helpful, friendly restaurant voice assistant for a restaurant called 'menyo! client'.
-        
-        Here is the specific KNOWLEDGE BASE for this restaurant:
-        ${systemContext}
-
-        Your Goal: Answer questions about the menu, hours, and location.
-        If the user wants to order, ask them what they would like, confirm availability based on the menu, and then say 'Great, I've started that order via Gloria Foods for you.'
-        If the user wants a reservation, ask for the party size and time, then say 'I've checked Gloria Foods and booked that table for you.'
-        
-        Keep answers concise and conversational (spoken word). Do not use markdown syntax in speech.`,
+        systemInstruction: systemInstruction, // Use the user-edited prompt directly
       },
       callbacks: {
         onopen: () => {
@@ -167,14 +158,7 @@ export class GeminiService {
 
     return {
       disconnect: async () => {
-        const session = await sessionPromise;
-        // There isn't an explicit disconnect method on the session object in the provided snippet,
-        // but typically closing the underlying socket or letting the object go out of scope works.
-        // We will simulate a close or stop sending.
-        // In the real SDK, typically session.close() exists if it's a persistent connection wrapper.
-        // Assuming session.close() based on standard WebSocket wrappers, if not available we just stop processing.
-        // The provided snippet uses callbacks.onclose. 
-        // We will force clean up audio context.
+        await sessionPromise;
         outputAudioContext.close();
       },
       sendAudio: (pcmData: Float32Array) => {

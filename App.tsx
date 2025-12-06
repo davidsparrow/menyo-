@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Upload, Check, Store, Link2, Phone, Mic, ArrowRight, Loader2, KeyRound } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Upload, Check, Store, Link2, Phone, Mic, ArrowRight, Loader2, KeyRound, BookOpen, Edit3, Settings2, Users, Accessibility, Baby, UtensilsCrossed } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { geminiService } from './services/geminiService';
 import { RestaurantProfile, VoiceOption } from './types';
@@ -26,6 +26,16 @@ function App() {
     },
     voiceId: VoiceOption.Zephyr,
     phoneNumber: null,
+    
+    // New Fields defaults
+    bookingPreference: 'GLORIA_FOODS',
+    policies: {
+      dietaryRestrictions: "We offer Gluten Free and Vegetarian options. Please ask specific allergen questions.",
+      kidsZone: "We are family friendly and have high chairs available.",
+      accessibility: "Our main entrance is wheelchair accessible.",
+      largeParties: "Parties over 6 please call ahead."
+    },
+    editableSystemPrompt: "",
   });
 
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
@@ -62,6 +72,13 @@ function App() {
       info: { ...prev.info, [e.target.name]: e.target.value }
     }));
   };
+  
+  const handlePolicyChange = (key: keyof typeof profile.policies, value: string) => {
+    setProfile(prev => ({
+      ...prev,
+      policies: { ...prev.policies, [key]: value }
+    }));
+  };
 
   const syncGoogleBusiness = async () => {
     setLoading(true);
@@ -76,6 +93,13 @@ function App() {
         hours: "Mon-Sun 9am - 10pm",
         website: "www.joesbistro.com",
         cuisine: "Italian-American"
+      },
+      // Simulate scraped attributes
+      policies: {
+        ...prev.policies,
+        accessibility: "Wheelchair accessible entrance, elevator, and restroom.",
+        kidsZone: "Good for kids. High chairs and changing table in family restroom available.",
+        dietaryRestrictions: "Vegetarian friendly. Gluten-free pasta available upon request.",
       },
       integrations: { ...prev.integrations, googleBusiness: true }
     }));
@@ -93,8 +117,7 @@ function App() {
       ...prev,
       gloriaFoodsToken: gloriaInput,
       integrations: { ...prev.integrations, gloriaFoods: true },
-      // Append integration context for the AI
-      menuContext: prev.menuContext + `\n\n[SYSTEM: INTEGRATION ACTIVE]\nGloria Foods Ordering & Reservations are CONNECTED.\n- Use the 'gloria_order' tool for placing orders (simulated).\n- Use 'gloria_reserve' for tables.\n- Verify table availability automatically.`
+      bookingPreference: 'GLORIA_FOODS' // Default to Gloria if connected
     }));
     setLoading(false);
   };
@@ -105,12 +128,78 @@ function App() {
     setProfile(prev => ({
       ...prev,
       phoneNumber: "+1 (415) 555-0199",
+      humanSupportPhone: "+1 (415) 555-0000", // Mock existing landline
       integrations: { ...prev.integrations, twilio: true }
     }));
     setLoading(false);
   };
 
+  // --- Prompt Generation Logic ---
+  // Re-generate the prompt whenever relevant fields change, UNLESS user has manually edited it.
+  // For simplicity here, we will just regenerate it when entering Step 4 or clicking "Regenerate".
+  const generateSystemPrompt = () => {
+    const p = profile;
+    
+    let bookingInstructions = "";
+    if (p.bookingPreference === 'GLORIA_FOODS' && p.integrations.gloriaFoods) {
+      bookingInstructions = `- Use the 'gloria_reserve' tool to check availability and book tables for parties.
+- If the party size is larger than 8, please politely ask them to call the restaurant directly at ${p.humanSupportPhone || p.info.phone}.`;
+    } else if (p.bookingPreference === 'CUSTOM' && p.customBookingUrl) {
+      bookingInstructions = `- Direct customers to book online at ${p.customBookingUrl}. Do not attempt to take the reservation yourself.`;
+    } else {
+      bookingInstructions = `- For all reservation requests, please transfer them to the human host or provide the phone number: ${p.humanSupportPhone || p.info.phone}.`;
+    }
+
+    const orderInstructions = p.integrations.gloriaFoods 
+      ? `- You can place takeout orders using the 'gloria_order' tool. Confirm items against the menu.`
+      : `- For takeout orders, please ask them to call ${p.humanSupportPhone || p.info.phone} or visit our website.`;
+
+    const prompt = `You are an AI Voice Assistant for ${p.info.name}, a ${p.info.cuisine} restaurant located at ${p.info.address}.
+Your voice should be friendly, professional, and efficient.
+
+*** KNOWLEDGE BASE ***
+
+[BUSINESS INFO]
+Hours: ${p.info.hours}
+Website: ${p.info.website}
+Location: ${p.info.address}
+
+[MENU & SPECIALS]
+${p.menuContext || "No menu uploaded yet."}
+
+[POLICIES & FACILITIES]
+- Dietary: ${p.policies.dietaryRestrictions}
+- Kids/Family: ${p.policies.kidsZone}
+- Accessibility: ${p.policies.accessibility}
+- Large Parties: ${p.policies.largeParties}
+
+*** OPERATIONAL RULES ***
+
+[RESERVATIONS]
+${bookingInstructions}
+
+[ORDERING]
+${orderInstructions}
+
+[GENERAL BEHAVIOR]
+- Keep responses concise (under 2 sentences when possible) as this is a voice conversation.
+- If you are unsure about a specific allergen not mentioned in the menu, apologize and suggest they speak to a manager.
+- Always be polite and welcoming.
+`;
+
+    setProfile(prev => ({ ...prev, editableSystemPrompt: prompt }));
+  };
+
+  // Trigger prompt generation when entering Step 4
+  useEffect(() => {
+    if (step === 4) {
+      generateSystemPrompt();
+    }
+  }, [step, profile.integrations, profile.bookingPreference]);
+
+
   const nextStep = () => setStep(prev => prev + 1);
+
 
   // --- Render Steps ---
 
@@ -305,17 +394,6 @@ function App() {
              </div>
           )}
         </div>
-
-        {/* Placeholder for OpenTable */}
-        <div className="p-6 rounded-2xl border border-slate-100 opacity-60 cursor-not-allowed flex items-center justify-between bg-slate-50 grayscale hover:opacity-70 transition">
-          <div className="flex items-center gap-5">
-             <div className="w-14 h-14 bg-gray-200 rounded-xl flex items-center justify-center font-bold text-gray-400 text-xl">OT</div>
-             <div>
-               <h4 className="font-bold text-slate-700 text-lg">OpenTable</h4>
-               <p className="text-sm text-slate-500">Coming Soon</p>
-             </div>
-          </div>
-        </div>
       </div>
 
        <div className="flex justify-between items-center pt-6 border-t border-slate-100">
@@ -330,7 +408,147 @@ function App() {
     </div>
   );
 
-  const renderStep4_Phone = () => (
+  const renderStep4_KnowledgeBase = () => (
+    <div className="space-y-8 h-full flex flex-col">
+       <div>
+        <h2 className="text-3xl font-bold text-slate-900 mb-2">Knowledge Base Studio</h2>
+        <p className="text-slate-500 text-lg">Define policies and review the exact instructions your Voice Bot will follow.</p>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-8 flex-1">
+        
+        {/* Left Col: Structured Data */}
+        <div className="space-y-6 overflow-y-auto pr-2">
+          
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+             <div className="flex items-center gap-2 mb-4 text-brand-700 font-bold border-b border-brand-100 pb-2">
+               <Settings2 className="w-5 h-5" /> Operational Policies
+             </div>
+
+             <div className="space-y-4">
+                <div>
+                   <label className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1.5 mb-2">
+                     <UtensilsCrossed className="w-3.5 h-3.5" /> Dietary Restrictions
+                   </label>
+                   <textarea 
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+                      rows={2}
+                      value={profile.policies.dietaryRestrictions}
+                      onChange={(e) => handlePolicyChange('dietaryRestrictions', e.target.value)}
+                   />
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1.5 mb-2">
+                     <Baby className="w-3.5 h-3.5" /> Kids & Family
+                   </label>
+                   <textarea 
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+                      rows={2}
+                      value={profile.policies.kidsZone}
+                      onChange={(e) => handlePolicyChange('kidsZone', e.target.value)}
+                   />
+                </div>
+                <div>
+                   <label className="text-xs font-semibold text-slate-500 uppercase flex items-center gap-1.5 mb-2">
+                     <Accessibility className="w-3.5 h-3.5" /> Accessibility
+                   </label>
+                   <textarea 
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+                      rows={2}
+                      value={profile.policies.accessibility}
+                      onChange={(e) => handlePolicyChange('accessibility', e.target.value)}
+                   />
+                </div>
+             </div>
+          </div>
+
+          <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+             <div className="flex items-center gap-2 mb-4 text-orange-700 font-bold border-b border-orange-100 pb-2">
+               <Users className="w-5 h-5" /> Booking Logic
+             </div>
+             
+             <div className="space-y-4">
+                <div>
+                   <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Reservation Handling</label>
+                   <select 
+                    value={profile.bookingPreference}
+                    onChange={(e) => setProfile(p => ({...p, bookingPreference: e.target.value as any}))}
+                    className="w-full p-3 border border-slate-200 rounded-lg bg-white font-medium"
+                   >
+                     <option value="GLORIA_FOODS" disabled={!profile.integrations.gloriaFoods}>Use Gloria Foods API {profile.integrations.gloriaFoods ? '(Connected)' : '(Not Connected)'}</option>
+                     <option value="HUMAN_SUPPORT">Route to Human Phone</option>
+                     <option value="CUSTOM">Custom Booking URL</option>
+                   </select>
+                </div>
+                
+                {profile.bookingPreference === 'HUMAN_SUPPORT' && (
+                  <div>
+                    <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Support Phone Number</label>
+                    <input 
+                      type="text" 
+                      value={profile.humanSupportPhone || ''}
+                      onChange={(e) => setProfile(p => ({...p, humanSupportPhone: e.target.value}))}
+                      className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50"
+                      placeholder="+1 (555) ..."
+                    />
+                  </div>
+                )}
+                
+                 <div>
+                   <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Large Party Policy</label>
+                   <input 
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+                      value={profile.policies.largeParties}
+                      onChange={(e) => handlePolicyChange('largeParties', e.target.value)}
+                   />
+                </div>
+             </div>
+          </div>
+        
+        </div>
+
+        {/* Right Col: Raw Prompt Editor */}
+        <div className="flex flex-col h-full bg-slate-900 rounded-2xl overflow-hidden shadow-2xl ring-4 ring-slate-100">
+           <div className="bg-slate-800 p-4 flex justify-between items-center border-b border-slate-700">
+             <div className="flex items-center gap-2 text-slate-200 font-mono text-sm">
+                <BookOpen className="w-4 h-4" /> System_Instruction.txt
+             </div>
+             <div className="flex gap-2">
+                <button 
+                  onClick={generateSystemPrompt} 
+                  className="text-xs bg-slate-700 hover:bg-slate-600 text-white px-3 py-1.5 rounded transition"
+                >
+                  Regenerate from Data
+                </button>
+             </div>
+           </div>
+           <div className="flex-1 relative group">
+             <textarea 
+                className="w-full h-full bg-slate-900 text-slate-300 font-mono text-sm p-6 resize-none outline-none leading-relaxed"
+                value={profile.editableSystemPrompt}
+                onChange={(e) => setProfile(p => ({...p, editableSystemPrompt: e.target.value}))}
+             />
+             <div className="absolute bottom-4 right-4 bg-blue-600/20 text-blue-400 px-3 py-1 rounded-full text-xs font-mono border border-blue-500/30 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+               LIVE EDIT MODE
+             </div>
+           </div>
+        </div>
+
+      </div>
+
+      <div className="flex justify-between items-center pt-6 border-t border-slate-100">
+         <button onClick={() => setStep(3)} className="text-slate-400 hover:text-slate-600 font-medium px-4 py-2">Back</button>
+         <button 
+          onClick={nextStep}
+          className="bg-brand-600 text-white px-8 py-3 rounded-xl font-semibold hover:bg-brand-700 shadow-lg shadow-brand-500/20"
+        >
+          Confirm Knowledge Base
+        </button>
+      </div>
+    </div>
+  );
+
+  const renderStep5_Phone = () => (
     <div className="space-y-8">
       <div>
         <h2 className="text-3xl font-bold text-slate-900 mb-2">Provision Phone Number</h2>
@@ -366,7 +584,7 @@ function App() {
       )}
 
       <div className="flex justify-between items-center pt-6 border-t border-slate-100">
-         <button onClick={() => setStep(3)} className="text-slate-400 hover:text-slate-600 font-medium px-4 py-2">Back</button>
+         <button onClick={() => setStep(4)} className="text-slate-400 hover:text-slate-600 font-medium px-4 py-2">Back</button>
          <button 
           onClick={nextStep}
           disabled={!profile.phoneNumber}
@@ -378,7 +596,7 @@ function App() {
     </div>
   );
 
-  const renderStep5_Voice = () => (
+  const renderStep6_Voice = () => (
     <div className="space-y-8">
       <div>
         <h2 className="text-3xl font-bold text-slate-900 mb-2">Select Voice Personality</h2>
@@ -415,16 +633,8 @@ function App() {
         ))}
       </div>
 
-       <div className="bg-slate-100 p-6 rounded-2xl mt-4 flex items-center justify-between">
-         <div>
-            <h4 className="font-bold text-slate-800 mb-1">Looking for Voice Cloning?</h4>
-            <p className="text-sm text-slate-500">Clone your own voice using ElevenLabs or Cartesia.</p>
-         </div>
-         <button className="px-4 py-2 bg-slate-200 text-slate-500 text-sm font-bold rounded-lg uppercase tracking-wide cursor-not-allowed">Pro Only</button>
-       </div>
-
       <div className="flex justify-between items-center pt-6 border-t border-slate-100">
-         <button onClick={() => setStep(4)} className="text-slate-400 hover:text-slate-600 font-medium px-4 py-2">Back</button>
+         <button onClick={() => setStep(5)} className="text-slate-400 hover:text-slate-600 font-medium px-4 py-2">Back</button>
          <button 
           onClick={nextStep}
           className="bg-brand-600 text-white px-8 py-4 rounded-xl font-bold hover:bg-brand-700 shadow-xl shadow-brand-500/30 transform transition hover:-translate-y-1"
@@ -437,7 +647,7 @@ function App() {
 
   // --- Main Render ---
 
-  if (step > 5) {
+  if (step > 6) {
     return <Dashboard profile={profile} />;
   }
 
@@ -462,8 +672,9 @@ function App() {
              { id: 1, label: 'Upload Menu' },
              { id: 2, label: 'Sync Profile' },
              { id: 3, label: 'Integrations' },
-             { id: 4, label: 'Phone Setup' },
-             { id: 5, label: 'Voice Config' },
+             { id: 4, label: 'Knowledge Base' },
+             { id: 5, label: 'Phone Setup' },
+             { id: 6, label: 'Voice Config' },
            ].map((item) => {
              const isActive = step === item.id;
              const isCompleted = step > item.id;
@@ -502,15 +713,16 @@ function App() {
 
       {/* Main Content Area */}
       <div className="flex-1 relative overflow-y-auto bg-slate-50">
-        <div className="max-w-4xl mx-auto py-12 px-8">
+        <div className="max-w-6xl mx-auto py-12 px-8 h-full">
           
           {/* Card Container */}
-          <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-10 md:p-14 transition-all animate-in fade-in slide-in-from-bottom-4 duration-500">
+          <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-10 md:p-14 transition-all animate-in fade-in slide-in-from-bottom-4 duration-500 min-h-[600px] flex flex-col">
             {step === 1 && renderStep1_Menu()}
             {step === 2 && renderStep2_Google()}
             {step === 3 && renderStep3_Integrations()}
-            {step === 4 && renderStep4_Phone()}
-            {step === 5 && renderStep5_Voice()}
+            {step === 4 && renderStep4_KnowledgeBase()}
+            {step === 5 && renderStep5_Phone()}
+            {step === 6 && renderStep6_Voice()}
           </div>
           
           <div className="text-center mt-8 text-slate-400 text-sm font-medium">
