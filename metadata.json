@@ -1,0 +1,7 @@
+{
+  "name": "menyo!",
+  "description": "SAAS platform for restaurants to build voice AI agents instantly.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
