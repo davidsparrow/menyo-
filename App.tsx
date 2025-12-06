@@ -1,13 +1,24 @@
-import React, { useState, useEffect } from 'react';
-import { Upload, Check, Store, Link2, Phone, Mic, ArrowRight, Loader2, KeyRound, BookOpen, Edit3, Settings2, Users, Accessibility, Baby, UtensilsCrossed } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Upload, Check, Store, Link2, Phone, Mic, ArrowRight, Loader2, KeyRound, BookOpen, Edit3, Settings, Users, Accessibility, Baby, UtensilsCrossed, MessageSquare, Send, X, Bot, Save } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { geminiService } from './services/geminiService';
 import { RestaurantProfile, VoiceOption } from './types';
 
 function App() {
+  const [view, setView] = useState<'WIZARD' | 'DASHBOARD' | 'SETTINGS'>('WIZARD');
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [gloriaInput, setGloriaInput] = useState('');
+  
+  // Settings State
+  const [settingsTab, setSettingsTab] = useState<'KNOWLEDGE' | 'VOICE' | 'PHONE'>('KNOWLEDGE');
+  const [chatMessage, setChatMessage] = useState('');
+  const [chatHistory, setChatHistory] = useState<{role: 'user' | 'assistant', text: string}[]>([
+    { role: 'assistant', text: "Hi! I'm your Knowledge Base Assistant. Tell me what needs to change—like 'We no longer allow dogs' or 'We are closed on Mondays'—and I'll update your settings automatically." }
+  ]);
+  const [isChatProcessing, setIsChatProcessing] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
+
   const [profile, setProfile] = useState<RestaurantProfile>({
     id: 'rest_123',
     info: {
@@ -134,9 +145,54 @@ function App() {
     setLoading(false);
   };
 
+  // --- Chat Agent Handler ---
+  const handleChatSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!chatMessage.trim() || isChatProcessing) return;
+
+    const userText = chatMessage;
+    setChatMessage('');
+    setChatHistory(prev => [...prev, { role: 'user', text: userText }]);
+    setIsChatProcessing(true);
+
+    try {
+      const updates = await geminiService.updateProfileViaChat(profile, userText);
+      
+      // Apply updates to state
+      setProfile(prev => {
+        const newPolicies = { ...prev.policies, ...(updates.policies || {}) };
+        const newInfo = { ...prev.info, ...(updates.info || {}) };
+        return {
+          ...prev,
+          policies: newPolicies,
+          info: newInfo
+        };
+      });
+
+      // Simple response logic
+      let responseText = "Updated!";
+      const keys = [...Object.keys(updates.policies || {}), ...Object.keys(updates.info || {})];
+      if (keys.length > 0) {
+        responseText = `I've updated the ${keys.join(', ')} for you.`;
+      } else {
+        responseText = "I couldn't identify any specific settings to update from your message. Could you be more specific?";
+      }
+
+      setChatHistory(prev => [...prev, { role: 'assistant', text: responseText }]);
+    } catch (err) {
+      setChatHistory(prev => [...prev, { role: 'assistant', text: "Sorry, I had trouble updating the settings." }]);
+    } finally {
+      setIsChatProcessing(false);
+    }
+  };
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [chatHistory]);
+
+
   // --- Prompt Generation Logic ---
   // Re-generate the prompt whenever relevant fields change, UNLESS user has manually edited it.
-  // For simplicity here, we will just regenerate it when entering Step 4 or clicking "Regenerate".
   const generateSystemPrompt = () => {
     const p = profile;
     
@@ -190,15 +246,21 @@ ${orderInstructions}
     setProfile(prev => ({ ...prev, editableSystemPrompt: prompt }));
   };
 
-  // Trigger prompt generation when entering Step 4
+  // Trigger prompt generation when entering Step 4 or periodically if needed
   useEffect(() => {
-    if (step === 4) {
+    if (step === 4 || view === 'SETTINGS') {
       generateSystemPrompt();
     }
-  }, [step, profile.integrations, profile.bookingPreference]);
+  }, [step, profile.integrations, profile.bookingPreference, profile.policies, profile.info, view]);
 
 
-  const nextStep = () => setStep(prev => prev + 1);
+  const nextStep = () => {
+    if (step === 6) {
+      setView('DASHBOARD');
+    } else {
+      setStep(prev => prev + 1);
+    }
+  };
 
 
   // --- Render Steps ---
@@ -422,7 +484,7 @@ ${orderInstructions}
           
           <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
              <div className="flex items-center gap-2 mb-4 text-brand-700 font-bold border-b border-brand-100 pb-2">
-               <Settings2 className="w-5 h-5" /> Operational Policies
+               <Settings className="w-5 h-5" /> Operational Policies
              </div>
 
              <div className="space-y-4">
@@ -645,12 +707,265 @@ ${orderInstructions}
     </div>
   );
 
+  // --- Settings View Components ---
+
+  const renderSettings = () => (
+    <div className="max-w-7xl mx-auto py-8 px-6 h-full flex flex-col">
+       <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-3xl font-bold text-slate-900">Settings & Configuration</h1>
+            <p className="text-slate-500">Manage your agent's behavior, voice, and connection.</p>
+          </div>
+          <button onClick={() => setView('DASHBOARD')} className="p-2 hover:bg-slate-100 rounded-full">
+            <X className="w-6 h-6 text-slate-500" />
+          </button>
+       </div>
+
+       <div className="flex flex-1 gap-8 overflow-hidden">
+          {/* Settings Sidebar */}
+          <div className="w-64 flex-shrink-0 space-y-2">
+            <button 
+              onClick={() => setSettingsTab('KNOWLEDGE')}
+              className={`w-full text-left p-4 rounded-xl font-medium transition-colors flex items-center gap-3 ${settingsTab === 'KNOWLEDGE' ? 'bg-white shadow-sm text-brand-700 ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/50'}`}
+            >
+              <BookOpen className="w-5 h-5" /> Knowledge Base
+            </button>
+            <button 
+              onClick={() => setSettingsTab('VOICE')}
+              className={`w-full text-left p-4 rounded-xl font-medium transition-colors flex items-center gap-3 ${settingsTab === 'VOICE' ? 'bg-white shadow-sm text-brand-700 ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/50'}`}
+            >
+              <Mic className="w-5 h-5" /> Voice & Personality
+            </button>
+            <button 
+              onClick={() => setSettingsTab('PHONE')}
+              className={`w-full text-left p-4 rounded-xl font-medium transition-colors flex items-center gap-3 ${settingsTab === 'PHONE' ? 'bg-white shadow-sm text-brand-700 ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/50'}`}
+            >
+              <Phone className="w-5 h-5" /> Phone Number
+            </button>
+          </div>
+
+          {/* Settings Content */}
+          <div className="flex-1 bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden flex flex-col">
+             
+             {settingsTab === 'KNOWLEDGE' && (
+               <div className="flex h-full">
+                  {/* Standard Form Area */}
+                  <div className="flex-1 p-8 overflow-y-auto border-r border-slate-100">
+                    <h3 className="text-xl font-bold text-slate-900 mb-6">Policies & Booking</h3>
+                    <div className="space-y-6">
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Dietary Restrictions</label>
+                        <textarea 
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+                            rows={3}
+                            value={profile.policies.dietaryRestrictions}
+                            onChange={(e) => handlePolicyChange('dietaryRestrictions', e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Kids Policy</label>
+                        <textarea 
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+                            rows={3}
+                            value={profile.policies.kidsZone}
+                            onChange={(e) => handlePolicyChange('kidsZone', e.target.value)}
+                        />
+                      </div>
+                      <div>
+                        <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Accessibility</label>
+                        <textarea 
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+                            rows={3}
+                            value={profile.policies.accessibility}
+                            onChange={(e) => handlePolicyChange('accessibility', e.target.value)}
+                        />
+                      </div>
+                      <div>
+                         <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Booking Logic</label>
+                         <select 
+                          value={profile.bookingPreference}
+                          onChange={(e) => setProfile(p => ({...p, bookingPreference: e.target.value as any}))}
+                          className="w-full p-3 border border-slate-200 rounded-lg bg-white font-medium mb-2"
+                         >
+                           <option value="GLORIA_FOODS">Use Gloria Foods API</option>
+                           <option value="HUMAN_SUPPORT">Route to Human Phone</option>
+                           <option value="CUSTOM">Custom Booking URL</option>
+                         </select>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Chat Assistant */}
+                  <div className="w-96 bg-slate-50 flex flex-col border-l border-slate-200">
+                     <div className="p-4 bg-white border-b border-slate-200 flex items-center gap-2">
+                        <div className="w-8 h-8 bg-brand-100 rounded-full flex items-center justify-center">
+                           <Bot className="w-5 h-5 text-brand-600" />
+                        </div>
+                        <div>
+                           <p className="text-sm font-bold text-slate-900">Config Assistant</p>
+                           <p className="text-xs text-brand-600">AI Powered</p>
+                        </div>
+                     </div>
+                     
+                     <div className="flex-1 p-4 overflow-y-auto space-y-4">
+                        {chatHistory.map((msg, idx) => (
+                           <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                              <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${msg.role === 'user' ? 'bg-brand-600 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-700 rounded-tl-none'}`}>
+                                 {msg.text}
+                              </div>
+                           </div>
+                        ))}
+                        {isChatProcessing && (
+                           <div className="flex justify-start">
+                             <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none">
+                                <Loader2 className="w-4 h-4 text-slate-400 animate-spin" />
+                             </div>
+                           </div>
+                        )}
+                        <div ref={chatEndRef} />
+                     </div>
+
+                     <form onSubmit={handleChatSubmit} className="p-3 bg-white border-t border-slate-200">
+                        <div className="relative">
+                           <input 
+                              type="text" 
+                              placeholder="Type a change (e.g., 'We are closed Mondays')" 
+                              className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                              value={chatMessage}
+                              onChange={(e) => setChatMessage(e.target.value)}
+                           />
+                           <button 
+                             type="submit" 
+                             disabled={!chatMessage.trim() || isChatProcessing}
+                             className="absolute right-2 top-2 p-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition"
+                           >
+                              <Send className="w-4 h-4" />
+                           </button>
+                        </div>
+                     </form>
+                  </div>
+               </div>
+             )}
+
+             {settingsTab === 'VOICE' && (
+                <div className="p-8 overflow-y-auto">
+                   <h3 className="text-xl font-bold text-slate-900 mb-6">Select Voice Personality</h3>
+                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {Object.values(VoiceOption).map((voice) => (
+                        <div 
+                          key={voice}
+                          onClick={() => setProfile(p => ({...p, voiceId: voice}))}
+                          className={`p-5 rounded-2xl border-2 cursor-pointer transition-all ${profile.voiceId === voice ? 'border-brand-500 bg-brand-50/50' : 'border-slate-100 bg-white hover:border-slate-200'}`}
+                        >
+                          <div className="flex items-center gap-4">
+                            <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${profile.voiceId === voice ? 'bg-brand-200 text-brand-700' : 'bg-slate-100 text-slate-500'}`}>
+                              <Mic className="w-5 h-5" />
+                            </div>
+                            <div>
+                              <h4 className={`font-bold ${profile.voiceId === voice ? 'text-brand-900' : 'text-slate-800'}`}>{voice}</h4>
+                              <p className="text-xs text-slate-500">Gemini Native Voice</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                </div>
+             )}
+
+             {settingsTab === 'PHONE' && (
+                <div className="p-8 flex flex-col items-center justify-center h-full text-center">
+                   <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-6">
+                      <Phone className="w-10 h-10 text-green-600" />
+                   </div>
+                   <h3 className="text-2xl font-bold text-slate-900 mb-2">{profile.phoneNumber}</h3>
+                   <p className="text-slate-500 mb-8">This number is currently active and routing calls to your bot.</p>
+                   <button 
+                      onClick={getTwilioNumber}
+                      className="px-6 py-2 border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-50 font-medium text-sm"
+                   >
+                     Provision New Number
+                   </button>
+                </div>
+             )}
+
+          </div>
+       </div>
+    </div>
+  );
+
   // --- Main Render ---
 
-  if (step > 6) {
-    return <Dashboard profile={profile} />;
+  if (view === 'DASHBOARD') {
+    return (
+      <div className="h-screen flex flex-col">
+         <div className="flex-1 overflow-auto">
+            <Dashboard profile={profile} />
+         </div>
+         {/* Simple Back to Settings link/button overlay or part of Dashboard logic? 
+             Actually, sticking to the requested Sidebar navigation logic inside App 
+             would require Dashboard to likely be part of the main layout if Sidebar persists. 
+             Since Dashboard takes full screen in current impl, I will wrap Dashboard with a "Back to Settings" 
+             or just let the user rely on browser nav if we were using routing. 
+             But wait, the Sidebar is only in the Wizard flow in the previous code.
+             Let's re-introduce the Sidebar for Dashboard as well to allow accessing Settings.
+         */}
+         <div className="fixed bottom-6 left-6 z-50">
+            <button 
+               onClick={() => setView('SETTINGS')}
+               className="bg-slate-900 text-white p-4 rounded-full shadow-xl hover:bg-slate-800 transition-all group flex items-center gap-0 hover:gap-2 overflow-hidden"
+            >
+               <Settings className="w-6 h-6" />
+               <span className="max-w-0 group-hover:max-w-xs transition-all duration-300 opacity-0 group-hover:opacity-100 whitespace-nowrap text-sm font-bold">Settings</span>
+            </button>
+         </div>
+      </div>
+    );
   }
 
+  if (view === 'SETTINGS') {
+    return (
+       <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
+          {/* Reusing sidebar or just standalone settings page? The user said "accesible via gear icon near the SAAS Account Name in lower left corner" */}
+          {/* I will reuse the main Sidebar structure but keep content focused */}
+           <div className="w-72 bg-slate-900 border-r border-slate-800 flex flex-col flex-shrink-0 z-20 shadow-2xl">
+             <div className="p-8 border-b border-slate-800/50">
+               <div className="flex items-center gap-3">
+                 <div className="w-10 h-10 bg-brand-600 rounded-xl flex items-center justify-center shadow-lg shadow-brand-900/20">
+                   <Mic className="w-6 h-6 text-white" />
+                 </div>
+                 <div>
+                   <h1 className="text-2xl font-extrabold text-white tracking-tight">menyo!</h1>
+                 </div>
+               </div>
+             </div>
+             
+             <nav className="flex-1 p-6 space-y-1">
+                <button onClick={() => setView('DASHBOARD')} className="w-full text-left flex items-center gap-4 px-4 py-4 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition">
+                   <div className="w-8 h-8 rounded-full bg-slate-800 flex items-center justify-center"><ArrowRight className="w-4 h-4" /></div>
+                   <span className="font-medium text-sm">Back to Dashboard</span>
+                </button>
+             </nav>
+
+             <div className="p-8 border-t border-slate-800/50">
+               <div className="bg-slate-800/50 rounded-lg p-4 backdrop-blur-sm flex items-center justify-between">
+                 <div>
+                    <p className="text-xs text-slate-400 font-medium">Logged in as</p>
+                    <p className="text-sm text-white font-bold truncate w-32">restaurateur@menyo.com</p>
+                 </div>
+                 {/* The requested gear icon */}
+                 <button className="text-brand-400 hover:text-brand-300"><Settings className="w-5 h-5" /></button>
+               </div>
+             </div>
+          </div>
+          
+          <div className="flex-1 bg-slate-50 overflow-auto">
+             {renderSettings()}
+          </div>
+       </div>
+    )
+  }
+
+  // WIZARD VIEW
   return (
     <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
       
@@ -704,9 +1019,17 @@ ${orderInstructions}
          </nav>
          
          <div className="p-8 border-t border-slate-800/50">
-           <div className="bg-slate-800/50 rounded-lg p-4 backdrop-blur-sm">
-             <p className="text-xs text-slate-400 font-medium">Logged in as</p>
-             <p className="text-sm text-white font-bold truncate">restaurateur@menyo.com</p>
+           <div className="bg-slate-800/50 rounded-lg p-4 backdrop-blur-sm flex items-center justify-between">
+             <div>
+                <p className="text-xs text-slate-400 font-medium">Logged in as</p>
+                <p className="text-sm text-white font-bold truncate w-32">restaurateur@menyo.com</p>
+             </div>
+             <button 
+                onClick={() => setView('SETTINGS')} 
+                className="text-slate-400 hover:text-white transition p-1 hover:bg-slate-700 rounded"
+             >
+                <Settings className="w-5 h-5" />
+             </button>
            </div>
          </div>
       </div>

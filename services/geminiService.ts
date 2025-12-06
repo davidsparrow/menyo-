@@ -96,7 +96,43 @@ export class GeminiService {
     }
   }
 
-  // 2. Live API Connection
+  // 2. Configuration Assistant (Chat to JSON)
+  async updateProfileViaChat(currentProfile: any, userMessage: string): Promise<any> {
+    try {
+      const prompt = `
+      You are a Configuration Assistant for a restaurant voice bot. 
+      Your goal is to update the restaurant's policies based on the user's natural language request.
+
+      CURRENT CONFIGURATION (JSON):
+      ${JSON.stringify({ policies: currentProfile.policies, info: currentProfile.info })}
+
+      USER REQUEST:
+      "${userMessage}"
+
+      INSTRUCTIONS:
+      - Return ONLY a JSON object representing the fields that should be updated.
+      - You can update nested fields inside 'policies' (dietaryRestrictions, kidsZone, accessibility, largeParties).
+      - You can update 'info' fields (hours, phone, website).
+      - Do NOT wrap in markdown code blocks. Just raw JSON.
+      `;
+
+      const response = await this.ai.models.generateContent({
+        model: 'gemini-2.5-flash',
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json"
+        }
+      });
+      
+      const text = response.text || "{}";
+      return JSON.parse(text);
+    } catch (error) {
+      console.error("Error updating profile via chat:", error);
+      return {};
+    }
+  }
+
+  // 3. Live API Connection
   async connectLive(
     voiceName: VoiceOption,
     systemInstruction: string, // Full prompt passed from App state
