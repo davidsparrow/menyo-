@@ -1,7 +1,7 @@
 import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
 import { VoiceOption } from "../types";
 
-// Helper for Live API Audio
+// Helper for Live API Audio in UI
 export const blobToBase64 = (blob: Blob): Promise<string> => {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
