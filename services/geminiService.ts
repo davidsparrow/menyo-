@@ -228,6 +228,38 @@ export class GeminiService {
       }
     };
   }
+
+  // 5. Generate Text-to-Speech (TTS) matching the Native Voice
+  async generateTTS(text: string, voiceName: string): Promise<AudioBuffer> {
+    try {
+      const response = await this.ai.models.generateContent({
+        model: "gemini-2.5-flash-preview-tts",
+        contents: {
+          parts: [{ text: text }],
+        },
+        config: {
+          responseModalities: [Modality.AUDIO],
+          speechConfig: {
+            voiceConfig: {
+              prebuiltVoiceConfig: { voiceName: voiceName },
+            },
+          },
+        },
+      });
+
+      const base64Audio = response.candidates?.[0]?.content?.parts?.[0]?.inlineData?.data;
+      if (!base64Audio) throw new Error("No audio data returned");
+      
+      // We use a temporary context here just for decoding; playback happens in the App
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
+      const buffer = await decodeAudioData(decode(base64Audio), audioContext, 24000, 1);
+      
+      return buffer;
+    } catch (error) {
+      console.error("TTS Error:", error);
+      throw error;
+    }
+  }
 }
 
 export const geminiService = new GeminiService();

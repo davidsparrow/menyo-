@@ -493,12 +493,28 @@ ${orderInstructions}
     }
   };
 
-  const speakText = (text: string) => {
+  const speakText = async (text: string) => {
     if (!kioskVoiceEnabled) return;
+    
+    // Stop any existing browser TTS
     window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    // utterance.voice = window.speechSynthesis.getVoices()[0]; // Use default
-    window.speechSynthesis.speak(utterance);
+    
+    try {
+      // Attempt to use the Gemini Native Voice via TTS API
+      const audioBuffer = await geminiService.generateTTS(text, profile.voiceId);
+      
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
+      source.start(0);
+
+    } catch (err) {
+      console.warn("Gemini TTS failed, falling back to browser voice:", err);
+      // Fallback to browser voice
+      const utterance = new SpeechSynthesisUtterance(text);
+      window.speechSynthesis.speak(utterance);
+    }
   };
 
   const handleKioskSubmit = async (e?: React.FormEvent) => {
@@ -528,7 +544,7 @@ ${orderInstructions}
       );
 
       setKioskChatHistory(prev => [...prev, { role: 'model', text: responseText }]);
-      speakText(responseText);
+      await speakText(responseText);
 
     } catch (err) {
        console.error(err);
