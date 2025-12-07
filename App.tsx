@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, Check, Store, Link2, Phone, Mic, ArrowRight, Loader2, KeyRound, BookOpen, Edit3, Settings, Users, Accessibility, Baby, UtensilsCrossed, MessageSquare, Send, X, Bot, Save, Plug, Globe, Server, Plus, Trash2, ExternalLink, Mail, Lock, MonitorPlay, ShieldCheck, Home, ShoppingBag, Calendar, ChevronLeft, ChevronRight, Bell, Smartphone, RefreshCw, LayoutGrid, List, AlertTriangle, Volume2, VolumeX } from 'lucide-react';
+import { Upload, Check, Store, Link2, Phone, Mic, ArrowRight, Loader2, KeyRound, BookOpen, Edit3, Settings, Users, Accessibility, Baby, UtensilsCrossed, MessageSquare, Send, X, Bot, Save, Plug, Globe, Server, Plus, Trash2, ExternalLink, Mail, Lock, MonitorPlay, ShieldCheck, Home, ShoppingBag, Calendar, ChevronLeft, ChevronRight, Bell, Smartphone, RefreshCw, LayoutGrid, List, AlertTriangle, Volume2, VolumeX, Play, StopCircle } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { geminiService } from './services/geminiService';
 import { RestaurantProfile, VoiceOption, ConnectedApp, Reservation, Table } from './types';
@@ -20,6 +20,9 @@ function App() {
   ]);
   const [isChatProcessing, setIsChatProcessing] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Voice Preview State
+  const [previewPlaying, setPreviewPlaying] = useState<string | null>(null);
 
   // Reservation Settings State
   const [reservations, setReservations] = useState<Reservation[]>([
@@ -53,6 +56,7 @@ function App() {
   const [isKioskListening, setIsKioskListening] = useState(false);
   const [isKioskProcessing, setIsKioskProcessing] = useState(false);
   const kioskChatEndRef = useRef<HTMLDivElement>(null);
+  const recognitionRef = useRef<any>(null); // For Kiosk Mic Toggle
 
   // Test Bot Text Chat State
   const [showTextChat, setShowTextChat] = useState(false);
@@ -230,6 +234,29 @@ function App() {
       integrations: { ...prev.integrations, twilio: true }
     }));
     setLoading(false);
+  };
+
+  // --- Voice Preview Handler ---
+  const handleVoicePreview = async (e: React.MouseEvent, voice: VoiceOption) => {
+    e.stopPropagation();
+    if (previewPlaying) return;
+
+    setPreviewPlaying(voice);
+    try {
+      const text = `Welcome to ${profile.info.name || 'our restaurant'}. How can I help you today?`;
+      const audioBuffer = await geminiService.generateTTS(text, voice);
+      
+      const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
+      const source = audioContext.createBufferSource();
+      source.buffer = audioBuffer;
+      source.connect(audioContext.destination);
+      source.onended = () => setPreviewPlaying(null);
+      source.start(0);
+    } catch (err) {
+      console.error(err);
+      setPreviewPlaying(null);
+      alert("Could not play preview.");
+    }
   };
 
   // --- Connected Apps Handlers ---
@@ -468,28 +495,65 @@ ${orderInstructions}
   };
   
   // Kiosk Chat Handlers
-  const handleKioskMic = () => {
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.lang = 'en-US';
-
-      setIsKioskListening(true);
-
-      recognition.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        setKioskInput(transcript);
-        setIsKioskListening(false);
-      };
-
-      recognition.onerror = () => setIsKioskListening(false);
-      recognition.onend = () => setIsKioskListening(false);
-
-      recognition.start();
+  const toggleKioskMic = () => {
+    if (isKioskListening) {
+      // Stop listening logic
+      if (recognitionRef.current) {
+         try {
+           recognitionRef.current.stop();
+         } catch(e) { console.error(e); }
+         recognitionRef.current = null;
+      }
+      setIsKioskListening(false);
     } else {
-      alert("Voice input is not supported in this browser.");
+      // Start listening logic
+      if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+        const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+        const recognition = new SpeechRecognition();
+        recognition.continuous = true;
+        recognition.interimResults = true;
+        recognition.lang = 'en-US';
+
+        recognition.onresult = (event: any) => {
+          let final = '';
+          for (let i = event.resultIndex; i < event.results.length; ++i) {
+            if (event.results[i].isFinal) {
+              final += event.results[i][0].transcript;
+            }
+          }
+          
+          if (final) {
+             setKioskInput(prev => {
+                const needsSpace = prev && !prev.endsWith(' ');
+                return prev + (needsSpace ? ' ' : '') + final;
+             });
+          }
+        };
+
+        recognition.onerror = (e: any) => {
+          console.error("Speech Recognition Error:", e);
+          if (e.error === 'not-allowed') {
+             setIsKioskListening(false);
+             recognitionRef.current = null;
+          }
+        };
+
+        recognition.onend = () => {
+           // We let it turn off naturally if silence or error occurs to avoid loop
+           setIsKioskListening(false);
+           recognitionRef.current = null;
+        };
+
+        try {
+           recognition.start();
+           recognitionRef.current = recognition;
+           setIsKioskListening(true);
+        } catch (e) {
+           console.error(e);
+        }
+      } else {
+        alert("Voice input is not supported in this browser.");
+      }
     }
   };
 
@@ -1022,8 +1086,15 @@ ${orderInstructions}
           <div 
             key={voice}
             onClick={() => setProfile(p => ({...p, voiceId: voice}))}
-            className={`p-5 rounded-2xl border-2 cursor-pointer transition-all hover:shadow-md ${profile.voiceId === voice ? 'border-brand-500 bg-brand-50/50' : 'border-slate-100 bg-white hover:border-slate-200'}`}
+            className={`p-5 rounded-2xl border-2 cursor-pointer transition-all hover:shadow-md relative ${profile.voiceId === voice ? 'border-brand-500 bg-brand-50/50' : 'border-slate-100 bg-white hover:border-slate-200'}`}
           >
+            <button
+               onClick={(e) => handleVoicePreview(e, voice)}
+               className="absolute top-4 right-4 p-2 rounded-full bg-slate-100 text-slate-500 hover:bg-brand-100 hover:text-brand-600 transition z-10"
+               title="Preview Voice"
+            >
+               {previewPlaying === voice ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
+            </button>
             <div className="flex items-center gap-4">
               <div className={`w-12 h-12 rounded-full flex items-center justify-center transition-colors ${profile.voiceId === voice ? 'bg-brand-200 text-brand-700' : 'bg-slate-100 text-slate-500'}`}>
                 <Mic className="w-6 h-6" />
@@ -1888,8 +1959,15 @@ ${orderInstructions}
                         <div 
                           key={voice}
                           onClick={() => setProfile(p => ({...p, voiceId: voice}))}
-                          className={`p-5 rounded-2xl border-2 cursor-pointer transition-all ${profile.voiceId === voice ? 'border-brand-500 bg-brand-50/50' : 'border-slate-100 bg-white hover:border-slate-200'}`}
+                          className={`p-5 rounded-2xl border-2 cursor-pointer transition-all relative ${profile.voiceId === voice ? 'border-brand-500 bg-brand-50/50' : 'border-slate-100 bg-white hover:border-slate-200'}`}
                         >
+                          <button
+                             onClick={(e) => handleVoicePreview(e, voice)}
+                             className="absolute top-4 right-4 p-2 rounded-full bg-slate-100 text-slate-500 hover:bg-brand-100 hover:text-brand-600 transition z-10"
+                             title="Preview Voice"
+                          >
+                             {previewPlaying === voice ? <Loader2 className="w-5 h-5 animate-spin" /> : <Play className="w-5 h-5" />}
+                          </button>
                           <div className="flex items-center gap-4">
                             <div className={`w-10 h-10 rounded-full flex items-center justify-center transition-colors ${profile.voiceId === voice ? 'bg-brand-200 text-brand-700' : 'bg-slate-100 text-slate-500'}`}>
                               <Mic className="w-5 h-5" />
@@ -2042,15 +2120,15 @@ ${orderInstructions}
                    <form onSubmit={handleKioskSubmit} className="p-4 border-t border-slate-200 bg-white relative flex gap-2 items-center">
                       <button 
                          type="button" 
-                         onClick={handleKioskMic}
-                         className={`p-3 rounded-full transition-all ${isKioskListening ? 'bg-red-500 text-white ring-4 ring-red-200 animate-pulse' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                         onClick={toggleKioskMic}
+                         className={`p-3 rounded-full transition-all duration-300 ${isKioskListening ? 'bg-red-500 text-white ring-4 ring-red-200 animate-pulse' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
                       >
                          <Mic className="w-5 h-5" />
                       </button>
                       <div className="relative flex-1">
                          <input 
-                            placeholder={isKioskListening ? "Listening..." : "Type or speak..."}
-                            className="w-full p-3 pr-10 bg-slate-100 rounded-xl outline-none text-slate-900 focus:ring-2 focus:ring-brand-500 transition-all" 
+                            placeholder={isKioskListening ? "Listening... (Tap mic to stop)" : "Type or speak..."}
+                            className={`w-full p-3 pr-10 bg-slate-100 rounded-xl outline-none text-slate-900 focus:ring-2 focus:ring-brand-500 transition-all ${isKioskListening ? 'ring-2 ring-red-200 bg-red-50' : ''}`} 
                             value={kioskInput}
                             onChange={(e) => setKioskInput(e.target.value)}
                          />
