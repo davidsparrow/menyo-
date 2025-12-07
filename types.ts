@@ -29,6 +29,22 @@ export interface Policies {
   largeParties: string; // e.g., "For parties over 8, please call..."
 }
 
+export interface ConnectedApp {
+  id: string;
+  name: string;
+  type: 'API' | 'WEBHOOK' | 'OTHER';
+  isDefault: boolean;
+  config: {
+    webhookIncoming?: string;
+    webhookOutgoing?: string;
+    apiKey?: string;
+    accountName?: string;
+    accountPassword?: string;
+    supportPhone?: string;
+    supportEmail?: string;
+  };
+}
+
 export interface RestaurantProfile {
   id: string;
   info: BusinessInfo;
@@ -44,6 +60,9 @@ export interface RestaurantProfile {
   humanSupportPhone?: string;
   policies: Policies;
   editableSystemPrompt: string; // The final source of truth for the bot
+
+  // Connected Apps
+  connectedApps: ConnectedApp[];
 }
 
 export enum VoiceOption {

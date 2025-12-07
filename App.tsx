@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, Check, Store, Link2, Phone, Mic, ArrowRight, Loader2, KeyRound, BookOpen, Edit3, Settings, Users, Accessibility, Baby, UtensilsCrossed, MessageSquare, Send, X, Bot, Save } from 'lucide-react';
+import { Upload, Check, Store, Link2, Phone, Mic, ArrowRight, Loader2, KeyRound, BookOpen, Edit3, Settings, Users, Accessibility, Baby, UtensilsCrossed, MessageSquare, Send, X, Bot, Save, Plug, Globe, Server, Plus, Trash2, ExternalLink, Mail } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { geminiService } from './services/geminiService';
-import { RestaurantProfile, VoiceOption } from './types';
+import { RestaurantProfile, VoiceOption, ConnectedApp } from './types';
 
 function App() {
   const [view, setView] = useState<'WIZARD' | 'DASHBOARD' | 'SETTINGS'>('WIZARD');
@@ -11,13 +11,18 @@ function App() {
   const [gloriaInput, setGloriaInput] = useState('');
   
   // Settings State
-  const [settingsTab, setSettingsTab] = useState<'KNOWLEDGE' | 'VOICE' | 'PHONE'>('KNOWLEDGE');
+  const [settingsTab, setSettingsTab] = useState<'KNOWLEDGE' | 'VOICE' | 'PHONE' | 'APPS'>('KNOWLEDGE');
   const [chatMessage, setChatMessage] = useState('');
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'assistant', text: string}[]>([
     { role: 'assistant', text: "Hi! I'm your Knowledge Base Assistant. Tell me what needs to change—like 'We no longer allow dogs' or 'We are closed on Mondays'—and I'll update your settings automatically." }
   ]);
   const [isChatProcessing, setIsChatProcessing] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
+
+  // Connected Apps State
+  const [selectedAppId, setSelectedAppId] = useState<string | null>('app_gloria');
+  const [isEditingApp, setIsEditingApp] = useState(false);
+  const [tempAppConfig, setTempAppConfig] = useState<ConnectedApp | null>(null);
 
   const [profile, setProfile] = useState<RestaurantProfile>({
     id: 'rest_123',
@@ -47,6 +52,32 @@ function App() {
       largeParties: "Parties over 6 please call ahead."
     },
     editableSystemPrompt: "",
+    
+    connectedApps: [
+      {
+        id: 'app_gloria',
+        name: 'Gloria Foods',
+        type: 'API',
+        isDefault: true,
+        config: {
+          apiKey: 'gf_live_8823719283712',
+          accountName: 'JoesBistro_GF',
+          supportPhone: '+1 (888) 555-0123',
+          supportEmail: 'support@gloriafood.com'
+        }
+      },
+      {
+        id: 'app_zapier',
+        name: 'Zapier Automation',
+        type: 'WEBHOOK',
+        isDefault: false,
+        config: {
+          webhookIncoming: 'https://hooks.zapier.com/hooks/catch/123456/abcde',
+          webhookOutgoing: 'https://api.menyo.com/v1/webhooks/zapier/out',
+          supportEmail: 'automation-team@joesbistro.com'
+        }
+      }
+    ]
   });
 
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
@@ -128,7 +159,11 @@ function App() {
       ...prev,
       gloriaFoodsToken: gloriaInput,
       integrations: { ...prev.integrations, gloriaFoods: true },
-      bookingPreference: 'GLORIA_FOODS' // Default to Gloria if connected
+      bookingPreference: 'GLORIA_FOODS', // Default to Gloria if connected
+      // Also update the connected app config for consistency
+      connectedApps: prev.connectedApps.map(app => 
+        app.id === 'app_gloria' ? { ...app, config: { ...app.config, apiKey: gloriaInput } } : app
+      )
     }));
     setLoading(false);
   };
@@ -143,6 +178,75 @@ function App() {
       integrations: { ...prev.integrations, twilio: true }
     }));
     setLoading(false);
+  };
+
+  // --- Connected Apps Handlers ---
+
+  const handleAppSelect = (app: ConnectedApp) => {
+    setSelectedAppId(app.id);
+    setIsEditingApp(false);
+    setTempAppConfig(null);
+  };
+
+  const handleEditApp = () => {
+    const app = profile.connectedApps.find(a => a.id === selectedAppId);
+    if (app) {
+      setTempAppConfig(JSON.parse(JSON.stringify(app))); // Deep copy
+      setIsEditingApp(true);
+    }
+  };
+
+  const handleSaveApp = () => {
+    if (tempAppConfig) {
+      setProfile(prev => ({
+        ...prev,
+        connectedApps: prev.connectedApps.map(app => 
+          app.id === tempAppConfig.id ? tempAppConfig : app
+        )
+      }));
+      setIsEditingApp(false);
+      setTempAppConfig(null);
+    }
+  };
+
+  const handleCancelEdit = () => {
+    setIsEditingApp(false);
+    setTempAppConfig(null);
+  };
+
+  const handleTestConnection = async () => {
+    setLoading(true);
+    await new Promise(r => setTimeout(r, 1000));
+    setLoading(false);
+    alert("Connection Test Successful! ✅");
+  };
+
+  const handleAddApp = () => {
+    const newApp: ConnectedApp = {
+      id: `app_${Date.now()}`,
+      name: 'New Connection',
+      type: 'WEBHOOK',
+      isDefault: false,
+      config: {}
+    };
+    setProfile(prev => ({
+      ...prev,
+      connectedApps: [...prev.connectedApps, newApp]
+    }));
+    setSelectedAppId(newApp.id);
+    setTempAppConfig(newApp);
+    setIsEditingApp(true);
+  };
+
+  const handleSetDefault = (appId: string) => {
+    setProfile(prev => ({
+      ...prev,
+      connectedApps: prev.connectedApps.map(app => ({
+        ...app,
+        isDefault: app.id === appId
+      }))
+    }));
+    // If we were editing, update the temp config too to reflect status if needed, though strictly UI is driven by profile for list
   };
 
   // --- Chat Agent Handler ---
@@ -709,6 +813,291 @@ ${orderInstructions}
 
   // --- Settings View Components ---
 
+  const renderConnectedApps = () => {
+    // Sort apps: Default first, then others
+    const sortedApps = [...profile.connectedApps].sort((a, b) => 
+      (a.isDefault === b.isDefault) ? 0 : a.isDefault ? -1 : 1
+    );
+
+    const activeApp = profile.connectedApps.find(a => a.id === selectedAppId);
+    // Use temp config if editing, otherwise active app config
+    const displayConfig = isEditingApp && tempAppConfig ? tempAppConfig : activeApp;
+
+    return (
+      <div className="flex h-full">
+         {/* Left List */}
+         <div className="w-72 border-r border-slate-200 bg-slate-50 p-4 flex flex-col">
+            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 px-2">Integrations</h3>
+            <div className="flex-1 space-y-2 overflow-y-auto">
+              {sortedApps.map(app => (
+                <button
+                  key={app.id}
+                  onClick={() => handleAppSelect(app)}
+                  className={`w-full text-left p-3 rounded-xl border transition-all relative ${selectedAppId === app.id ? 'bg-white border-brand-200 shadow-sm ring-1 ring-brand-100' : 'bg-white border-slate-100 hover:border-slate-200'}`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div className={`w-10 h-10 rounded-lg flex items-center justify-center ${app.type === 'WEBHOOK' ? 'bg-purple-100 text-purple-600' : 'bg-orange-100 text-orange-600'}`}>
+                       {app.type === 'WEBHOOK' ? <Globe className="w-5 h-5" /> : <Server className="w-5 h-5" />}
+                    </div>
+                    <div>
+                       <p className={`font-bold text-sm ${selectedAppId === app.id ? 'text-brand-900' : 'text-slate-700'}`}>{app.name}</p>
+                       <p className="text-xs text-slate-400">{app.type}</p>
+                    </div>
+                  </div>
+                  {app.isDefault && (
+                    <div className="absolute top-2 right-2 w-2 h-2 bg-green-500 rounded-full"></div>
+                  )}
+                </button>
+              ))}
+            </div>
+            <button 
+              onClick={handleAddApp}
+              className="mt-4 w-full py-3 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center gap-2 text-slate-500 font-medium hover:border-brand-300 hover:text-brand-600 hover:bg-brand-50 transition"
+            >
+              <Plus className="w-4 h-4" /> Add Connection
+            </button>
+         </div>
+
+         {/* Right Details */}
+         <div className="flex-1 bg-white p-8 overflow-y-auto">
+            {displayConfig ? (
+               <div className="max-w-2xl mx-auto">
+                  {/* Header */}
+                  <div className="flex items-center justify-between mb-8 pb-6 border-b border-slate-100">
+                     <div className="flex items-center gap-4">
+                        <div className={`w-14 h-14 rounded-2xl flex items-center justify-center shadow-sm ${displayConfig.type === 'WEBHOOK' ? 'bg-purple-600 text-white' : 'bg-orange-600 text-white'}`}>
+                           {displayConfig.type === 'WEBHOOK' ? <Globe className="w-7 h-7" /> : <Server className="w-7 h-7" />}
+                        </div>
+                        <div>
+                           {isEditingApp ? (
+                              <input 
+                                type="text" 
+                                value={displayConfig.name}
+                                onChange={(e) => setTempAppConfig(prev => prev ? {...prev, name: e.target.value} : null)}
+                                className="font-bold text-2xl text-slate-900 border-b border-slate-300 focus:border-brand-500 focus:outline-none bg-transparent"
+                              />
+                           ) : (
+                              <h2 className="font-bold text-2xl text-slate-900 flex items-center gap-2">
+                                 {displayConfig.name}
+                                 {displayConfig.isDefault && <span className="bg-green-100 text-green-700 text-xs px-2 py-1 rounded-full border border-green-200">Default App</span>}
+                              </h2>
+                           )}
+                           <p className="text-slate-500 text-sm">{displayConfig.id}</p>
+                        </div>
+                     </div>
+                     {!isEditingApp && (
+                       <div className="flex gap-2">
+                          <button 
+                            onClick={handleEditApp}
+                            className="px-4 py-2 bg-white border border-slate-200 rounded-lg text-slate-700 font-medium shadow-sm hover:bg-slate-50 transition"
+                          >
+                             Edit Settings
+                          </button>
+                          {!displayConfig.isDefault && (
+                             <button 
+                               onClick={() => handleSetDefault(displayConfig.id)}
+                               className="px-4 py-2 bg-brand-50 text-brand-700 rounded-lg font-medium hover:bg-brand-100 transition"
+                             >
+                               Make Default
+                             </button>
+                          )}
+                       </div>
+                     )}
+                  </div>
+
+                  {/* Settings Form */}
+                  <div className="space-y-6">
+                     
+                     {/* Webhooks Section */}
+                     <div className="bg-slate-50 rounded-xl p-6 border border-slate-200">
+                        <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                           <Plug className="w-4 h-4" /> Endpoint Configuration
+                        </h4>
+                        <div className="space-y-4">
+                           {/* API Key */}
+                           {displayConfig.type === 'API' && (
+                             <div>
+                                <label className="text-xs font-semibold text-slate-500 uppercase mb-1.5 block">API Key</label>
+                                {isEditingApp ? (
+                                   <input 
+                                     type="text" 
+                                     value={displayConfig.config.apiKey || ''}
+                                     onChange={(e) => setTempAppConfig(prev => prev ? {...prev, config: {...prev.config, apiKey: e.target.value}} : null)}
+                                     className="w-full p-3 border border-slate-200 rounded-lg"
+                                   />
+                                ) : (
+                                   <div className="font-mono text-sm bg-white border border-slate-200 rounded p-2 text-slate-600 truncate">
+                                      {displayConfig.config.apiKey ? '••••••••••••••••' : 'Not Configured'}
+                                   </div>
+                                )}
+                             </div>
+                           )}
+
+                           {/* Incoming Webhook */}
+                           {displayConfig.type === 'WEBHOOK' && (
+                             <div>
+                                <label className="text-xs font-semibold text-slate-500 uppercase mb-1.5 block">Incoming Webhook (Trigger)</label>
+                                {isEditingApp ? (
+                                   <input 
+                                     type="text" 
+                                     value={displayConfig.config.webhookIncoming || ''}
+                                     onChange={(e) => setTempAppConfig(prev => prev ? {...prev, config: {...prev.config, webhookIncoming: e.target.value}} : null)}
+                                     className="w-full p-3 border border-slate-200 rounded-lg font-mono text-sm"
+                                   />
+                                ) : (
+                                   <div className="flex items-center gap-2 text-sm text-slate-600 bg-white p-2 rounded border border-slate-200">
+                                      <span className="truncate flex-1 font-mono">{displayConfig.config.webhookIncoming || 'Not configured'}</span>
+                                      <ExternalLink className="w-3 h-3 text-slate-400" />
+                                   </div>
+                                )}
+                             </div>
+                           )}
+
+                            {/* Outgoing Webhook */}
+                           <div>
+                              <label className="text-xs font-semibold text-slate-500 uppercase mb-1.5 block">Outgoing Webhook (Events)</label>
+                              {isEditingApp ? (
+                                 <input 
+                                   type="text" 
+                                   value={displayConfig.config.webhookOutgoing || ''}
+                                   onChange={(e) => setTempAppConfig(prev => prev ? {...prev, config: {...prev.config, webhookOutgoing: e.target.value}} : null)}
+                                   className="w-full p-3 border border-slate-200 rounded-lg font-mono text-sm"
+                                 />
+                              ) : (
+                                 <div className="flex items-center gap-2 text-sm text-slate-600 bg-white p-2 rounded border border-slate-200">
+                                    <span className="truncate flex-1 font-mono">{displayConfig.config.webhookOutgoing || 'Not configured'}</span>
+                                    <ExternalLink className="w-3 h-3 text-slate-400" />
+                                 </div>
+                              )}
+                           </div>
+                        </div>
+                     </div>
+
+                     {/* Credentials Section */}
+                     <div className="grid grid-cols-2 gap-6">
+                        <div>
+                           <label className="text-xs font-semibold text-slate-500 uppercase mb-1.5 block">Account Name</label>
+                           {isEditingApp ? (
+                              <input 
+                                type="text" 
+                                value={displayConfig.config.accountName || ''}
+                                onChange={(e) => setTempAppConfig(prev => prev ? {...prev, config: {...prev.config, accountName: e.target.value}} : null)}
+                                className="w-full p-3 border border-slate-200 rounded-lg"
+                              />
+                           ) : (
+                              <div className="p-3 bg-slate-50 rounded-lg text-slate-700 font-medium">
+                                 {displayConfig.config.accountName || '—'}
+                              </div>
+                           )}
+                        </div>
+                        <div>
+                           <label className="text-xs font-semibold text-slate-500 uppercase mb-1.5 block">Password / Secret</label>
+                           {isEditingApp ? (
+                              <input 
+                                type="password" 
+                                value={displayConfig.config.accountPassword || ''}
+                                onChange={(e) => setTempAppConfig(prev => prev ? {...prev, config: {...prev.config, accountPassword: e.target.value}} : null)}
+                                className="w-full p-3 border border-slate-200 rounded-lg"
+                                placeholder="••••••"
+                              />
+                           ) : (
+                              <div className="p-3 bg-slate-50 rounded-lg text-slate-400">
+                                 {displayConfig.config.accountPassword ? '••••••' : '—'}
+                              </div>
+                           )}
+                        </div>
+                     </div>
+
+                     {/* Support Info */}
+                     <div className="bg-brand-50/50 rounded-xl p-6 border border-brand-100">
+                        <h4 className="font-bold text-brand-800 mb-4 flex items-center gap-2">
+                           <Users className="w-4 h-4" /> Customer Support Routing
+                        </h4>
+                        <div className="grid grid-cols-2 gap-6">
+                           <div>
+                              <label className="text-xs font-semibold text-brand-600/70 uppercase mb-1.5 block">Support Phone</label>
+                              {isEditingApp ? (
+                                 <input 
+                                   type="text" 
+                                   value={displayConfig.config.supportPhone || ''}
+                                   onChange={(e) => setTempAppConfig(prev => prev ? {...prev, config: {...prev.config, supportPhone: e.target.value}} : null)}
+                                   className="w-full p-3 border border-brand-200 rounded-lg"
+                                   placeholder="+1 ..."
+                                 />
+                              ) : displayConfig.config.supportPhone ? (
+                                 <a 
+                                   href={`tel:${displayConfig.config.supportPhone}`} 
+                                   className="flex items-center gap-2 p-3 bg-white border border-brand-200 rounded-lg text-brand-600 font-bold hover:bg-brand-50 transition"
+                                 >
+                                    <Phone className="w-4 h-4" /> {displayConfig.config.supportPhone}
+                                 </a>
+                              ) : (
+                                 <div className="p-3 text-slate-400 text-sm">Not Configured</div>
+                              )}
+                           </div>
+                           <div>
+                              <label className="text-xs font-semibold text-brand-600/70 uppercase mb-1.5 block">Support Email</label>
+                              {isEditingApp ? (
+                                 <input 
+                                   type="text" 
+                                   value={displayConfig.config.supportEmail || ''}
+                                   onChange={(e) => setTempAppConfig(prev => prev ? {...prev, config: {...prev.config, supportEmail: e.target.value}} : null)}
+                                   className="w-full p-3 border border-brand-200 rounded-lg"
+                                   placeholder="help@..."
+                                 />
+                              ) : displayConfig.config.supportEmail ? (
+                                 <a 
+                                   href={`mailto:${displayConfig.config.supportEmail}`} 
+                                   className="flex items-center gap-2 p-3 bg-white border border-brand-200 rounded-lg text-brand-600 font-bold hover:bg-brand-50 transition"
+                                 >
+                                    <Mail className="w-4 h-4" /> {displayConfig.config.supportEmail}
+                                 </a>
+                              ) : (
+                                 <div className="p-3 text-slate-400 text-sm">Not Configured</div>
+                              )}
+                           </div>
+                        </div>
+                     </div>
+
+                     {/* Action Buttons (Edit Mode) */}
+                     {isEditingApp && (
+                        <div className="flex items-center justify-between pt-6 border-t border-slate-100 mt-6">
+                           <button 
+                             onClick={handleTestConnection}
+                             disabled={loading}
+                             className="text-brand-600 font-bold hover:underline flex items-center gap-2"
+                           >
+                             {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : 'Test Connection'}
+                           </button>
+                           <div className="flex gap-3">
+                              <button 
+                                onClick={handleCancelEdit}
+                                className="px-6 py-2 rounded-lg text-slate-600 font-medium hover:bg-slate-100"
+                              >
+                                Cancel
+                              </button>
+                              <button 
+                                onClick={handleSaveApp}
+                                className="px-6 py-2 bg-slate-900 text-white rounded-lg font-bold hover:bg-slate-800 shadow-lg shadow-slate-900/20"
+                              >
+                                Save Changes
+                              </button>
+                           </div>
+                        </div>
+                     )}
+                  </div>
+               </div>
+            ) : (
+               <div className="h-full flex flex-col items-center justify-center text-slate-400">
+                  <Plug className="w-16 h-16 mb-4 text-slate-200" />
+                  <p>Select an App to configure</p>
+               </div>
+            )}
+         </div>
+      </div>
+    );
+  };
+
   const renderSettings = () => (
     <div className="max-w-7xl mx-auto py-8 px-6 h-full flex flex-col">
        <div className="flex items-center justify-between mb-8">
@@ -741,6 +1130,12 @@ ${orderInstructions}
               className={`w-full text-left p-4 rounded-xl font-medium transition-colors flex items-center gap-3 ${settingsTab === 'PHONE' ? 'bg-white shadow-sm text-brand-700 ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/50'}`}
             >
               <Phone className="w-5 h-5" /> Phone Number
+            </button>
+            <button 
+              onClick={() => setSettingsTab('APPS')}
+              className={`w-full text-left p-4 rounded-xl font-medium transition-colors flex items-center gap-3 ${settingsTab === 'APPS' ? 'bg-white shadow-sm text-brand-700 ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/50'}`}
+            >
+              <Plug className="w-5 h-5" /> Connected Apps
             </button>
           </div>
 
@@ -877,7 +1272,7 @@ ${orderInstructions}
                    <div className="w-20 h-20 bg-green-100 rounded-full flex items-center justify-center mb-6">
                       <Phone className="w-10 h-10 text-green-600" />
                    </div>
-                   <h3 className="text-2xl font-bold text-slate-900 mb-2">{profile.phoneNumber}</h3>
+                   <h3 className="text-4xl font-bold text-slate-900 mb-2 font-mono tracking-tight">{profile.phoneNumber || 'No Number Assigned'}</h3>
                    <p className="text-slate-500 mb-8">This number is currently active and routing calls to your bot.</p>
                    <button 
                       onClick={getTwilioNumber}
@@ -887,6 +1282,8 @@ ${orderInstructions}
                    </button>
                 </div>
              )}
+
+             {settingsTab === 'APPS' && renderConnectedApps()}
 
           </div>
        </div>
@@ -901,14 +1298,6 @@ ${orderInstructions}
          <div className="flex-1 overflow-auto">
             <Dashboard profile={profile} />
          </div>
-         {/* Simple Back to Settings link/button overlay or part of Dashboard logic? 
-             Actually, sticking to the requested Sidebar navigation logic inside App 
-             would require Dashboard to likely be part of the main layout if Sidebar persists. 
-             Since Dashboard takes full screen in current impl, I will wrap Dashboard with a "Back to Settings" 
-             or just let the user rely on browser nav if we were using routing. 
-             But wait, the Sidebar is only in the Wizard flow in the previous code.
-             Let's re-introduce the Sidebar for Dashboard as well to allow accessing Settings.
-         */}
          <div className="fixed bottom-6 left-6 z-50">
             <button 
                onClick={() => setView('SETTINGS')}
@@ -925,8 +1314,6 @@ ${orderInstructions}
   if (view === 'SETTINGS') {
     return (
        <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
-          {/* Reusing sidebar or just standalone settings page? The user said "accesible via gear icon near the SAAS Account Name in lower left corner" */}
-          {/* I will reuse the main Sidebar structure but keep content focused */}
            <div className="w-72 bg-slate-900 border-r border-slate-800 flex flex-col flex-shrink-0 z-20 shadow-2xl">
              <div className="p-8 border-b border-slate-800/50">
                <div className="flex items-center gap-3">
@@ -952,7 +1339,6 @@ ${orderInstructions}
                     <p className="text-xs text-slate-400 font-medium">Logged in as</p>
                     <p className="text-sm text-white font-bold truncate w-32">restaurateur@menyo.com</p>
                  </div>
-                 {/* The requested gear icon */}
                  <button className="text-brand-400 hover:text-brand-300"><Settings className="w-5 h-5" /></button>
                </div>
              </div>
