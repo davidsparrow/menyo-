@@ -1,17 +1,19 @@
+
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, Check, Store, Link2, Phone, Mic, ArrowRight, Loader2, KeyRound, BookOpen, Edit3, Settings, Users, Accessibility, Baby, UtensilsCrossed, MessageSquare, Send, X, Bot, Save, Plug, Globe, Server, Plus, Trash2, ExternalLink, Mail } from 'lucide-react';
+import { Upload, Check, Store, Link2, Phone, Mic, ArrowRight, Loader2, KeyRound, BookOpen, Edit3, Settings, Users, Accessibility, Baby, UtensilsCrossed, MessageSquare, Send, X, Bot, Save, Plug, Globe, Server, Plus, Trash2, ExternalLink, Mail, Lock, MonitorPlay, ShieldCheck, Home, ShoppingBag, Calendar, ChevronLeft, ChevronRight, Bell, Smartphone, RefreshCw, LayoutGrid, List, AlertTriangle } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { geminiService } from './services/geminiService';
-import { RestaurantProfile, VoiceOption, ConnectedApp } from './types';
+import { RestaurantProfile, VoiceOption, ConnectedApp, Reservation, Table } from './types';
+import QRCode from 'react-qr-code';
 
 function App() {
-  const [view, setView] = useState<'WIZARD' | 'DASHBOARD' | 'SETTINGS'>('WIZARD');
+  const [view, setView] = useState<'WIZARD' | 'DASHBOARD' | 'SETTINGS' | 'DEPLOYED'>('WIZARD');
   const [step, setStep] = useState(1);
   const [loading, setLoading] = useState(false);
   const [gloriaInput, setGloriaInput] = useState('');
   
   // Settings State
-  const [settingsTab, setSettingsTab] = useState<'KNOWLEDGE' | 'VOICE' | 'PHONE' | 'APPS'>('KNOWLEDGE');
+  const [settingsTab, setSettingsTab] = useState<'KNOWLEDGE' | 'VOICE' | 'PHONE' | 'APPS' | 'SECURITY' | 'RESERVATIONS'>('KNOWLEDGE');
   const [chatMessage, setChatMessage] = useState('');
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'assistant', text: string}[]>([
     { role: 'assistant', text: "Hi! I'm your Knowledge Base Assistant. Tell me what needs to change—like 'We no longer allow dogs' or 'We are closed on Mondays'—and I'll update your settings automatically." }
@@ -19,10 +21,38 @@ function App() {
   const [isChatProcessing, setIsChatProcessing] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  // Reservation Settings State
+  const [reservations, setReservations] = useState<Reservation[]>([
+    { id: '1', customerName: 'Alice Johnson', date: '2025-05-15', time: '18:30', partySize: 4, status: 'CONFIRMED', phone: '(555) 123-4567', notes: 'Anniversary' },
+    { id: '2', customerName: 'Bob Smith', date: '2025-05-15', time: '19:00', partySize: 2, status: 'PENDING', phone: '(555) 987-6543', tableIds: ['t1'] },
+    { id: '3', customerName: 'Charlie Brown', date: '2025-05-16', time: '12:00', partySize: 6, status: 'CONFIRMED', phone: '(555) 555-5555', notes: 'High chair needed' },
+    { id: '4', customerName: 'Diana Ross', date: '2025-05-16', time: '19:30', partySize: 2, status: 'CANCELLED', phone: '(555) 111-2222' },
+    { id: '5', customerName: 'Evan Wright', date: '2025-05-17', time: '20:00', partySize: 8, status: 'CONFIRMED', phone: '(555) 333-4444', notes: 'Birthday party' },
+    { id: '6', customerName: 'Frank Overbook', date: '2025-05-15', time: '19:00', partySize: 12, status: 'PENDING', phone: '(555) 999-9999', hasConflict: true, notes: 'WARNING: Exceeds hourly capacity' },
+  ]);
+  const [selectedReservation, setSelectedReservation] = useState<Reservation | null>(null);
+  const [isEditingReservation, setIsEditingReservation] = useState(false);
+  const [resViewMode, setResViewMode] = useState<'CALENDAR' | 'CONFIG'>('CALENDAR');
+  const [resFilterGroupSize, setResFilterGroupSize] = useState<number | 'ALL'>('ALL');
+
   // Connected Apps State
   const [selectedAppId, setSelectedAppId] = useState<string | null>('app_gloria');
   const [isEditingApp, setIsEditingApp] = useState(false);
   const [tempAppConfig, setTempAppConfig] = useState<ConnectedApp | null>(null);
+
+  // Security & Deployment State
+  const [showUnlockModal, setShowUnlockModal] = useState(false);
+  const [unlockPassword, setUnlockPassword] = useState('');
+  const [unlockError, setUnlockError] = useState(false);
+  const [kioskView, setKioskView] = useState<'HOME' | 'ORDER' | 'RESERVE'>('HOME');
+
+  // Text Chat Bot State
+  const [showTextChat, setShowTextChat] = useState(false);
+  const [botChatHistory, setBotChatHistory] = useState<{role: 'user' | 'model', text: string}[]>([]);
+  const [botChatMessage, setBotChatMessage] = useState('');
+  const [isBotThinking, setIsBotThinking] = useState(false);
+  const botChatEndRef = useRef<HTMLDivElement>(null);
+
 
   const [profile, setProfile] = useState<RestaurantProfile>({
     id: 'rest_123',
@@ -53,6 +83,20 @@ function App() {
     },
     editableSystemPrompt: "",
     
+    // Reservation Configuration
+    maxGroupSize: 10,
+    maxGuestsPerHour: 50,
+    tables: [
+      { id: 't1', autoNumber: 1, name: 'Window Booth A', maxGuests: 4 },
+      { id: 't2', autoNumber: 2, name: 'Window Booth B', maxGuests: 4 },
+      { id: 't3', autoNumber: 3, name: 'Center Table 1', maxGuests: 2 },
+      { id: 't4', autoNumber: 4, name: 'Center Table 2', maxGuests: 2 },
+      { id: 't5', autoNumber: 5, name: 'Family Round', maxGuests: 8 },
+    ],
+
+    // Security
+    adminPassword: "Admin",
+
     connectedApps: [
       {
         id: 'app_gloria',
@@ -246,7 +290,6 @@ function App() {
         isDefault: app.id === appId
       }))
     }));
-    // If we were editing, update the temp config too to reflect status if needed, though strictly UI is driven by profile for list
   };
 
   // --- Chat Agent Handler ---
@@ -294,9 +337,45 @@ function App() {
     chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [chatHistory]);
 
+  // --- Test Bot Text Chat Handler ---
+  const handleBotChatSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!botChatMessage.trim() || isBotThinking) return;
+
+    const userText = botChatMessage;
+    setBotChatMessage('');
+    setBotChatHistory(prev => [...prev, { role: 'user', text: userText }]);
+    setIsBotThinking(true);
+
+    try {
+      // Construct history for Gemini API
+      const apiHistory = botChatHistory.map(msg => ({
+         role: msg.role,
+         parts: [{ text: msg.text }]
+      }));
+
+      const responseText = await geminiService.sendChatMessage(
+         apiHistory, 
+         profile.editableSystemPrompt,
+         userText
+      );
+
+      setBotChatHistory(prev => [...prev, { role: 'model', text: responseText }]);
+
+    } catch (err) {
+       console.error(err);
+       setBotChatHistory(prev => [...prev, { role: 'model', text: "Error connecting to bot." }]);
+    } finally {
+      setIsBotThinking(false);
+    }
+  };
+
+  useEffect(() => {
+    botChatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [botChatHistory]);
+
 
   // --- Prompt Generation Logic ---
-  // Re-generate the prompt whenever relevant fields change, UNLESS user has manually edited it.
   const generateSystemPrompt = () => {
     const p = profile;
     
@@ -350,7 +429,6 @@ ${orderInstructions}
     setProfile(prev => ({ ...prev, editableSystemPrompt: prompt }));
   };
 
-  // Trigger prompt generation when entering Step 4 or periodically if needed
   useEffect(() => {
     if (step === 4 || view === 'SETTINGS') {
       generateSystemPrompt();
@@ -366,8 +444,68 @@ ${orderInstructions}
     }
   };
 
+  // --- Deployed Logic ---
+  const handleUnlock = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (unlockPassword === profile.adminPassword) {
+      setView('DASHBOARD');
+      setShowUnlockModal(false);
+      setUnlockPassword('');
+      setUnlockError(false);
+      setKioskView('HOME'); // Reset kiosk view
+    } else {
+      setUnlockError(true);
+    }
+  };
 
-  // --- Render Steps ---
+  // --- Reservation Handlers ---
+  const handleReservationClick = (res: Reservation) => {
+    setSelectedReservation(res);
+    setIsEditingReservation(true);
+  };
+  
+  const handleUpdateReservation = () => {
+    if (selectedReservation) {
+      setReservations(prev => prev.map(r => r.id === selectedReservation.id ? selectedReservation : r));
+      setIsEditingReservation(false);
+      setSelectedReservation(null);
+    }
+  };
+  
+  const handleSendNotification = (type: 'SMS' | 'EMAIL') => {
+    alert(`Simulated ${type} sent to ${selectedReservation?.customerName}`);
+  };
+
+  const handleTableToggle = (tableId: string) => {
+    if (!selectedReservation) return;
+    const currentIds = selectedReservation.tableIds || [];
+    let newIds;
+    if (currentIds.includes(tableId)) {
+      newIds = currentIds.filter(id => id !== tableId);
+    } else {
+      newIds = [...currentIds, tableId];
+    }
+    setSelectedReservation({ ...selectedReservation, tableIds: newIds });
+  };
+
+  const handleAddTable = () => {
+    const newTable: Table = {
+      id: `t_${Date.now()}`,
+      autoNumber: profile.tables.length + 1,
+      name: `Table ${profile.tables.length + 1}`,
+      maxGuests: 4
+    };
+    setProfile(p => ({ ...p, tables: [...p.tables, newTable] }));
+  };
+
+  const handleDeleteTable = (id: string) => {
+    setProfile(p => ({ ...p, tables: p.tables.filter(t => t.id !== id) }));
+  };
+
+
+  // --- Render Steps (Wizard) ---
+  // ... (Step 1-6 Functions Omitted for brevity but assumed present in final XML if I were outputting full file. 
+  // IMPORTANT: Since I am outputting the WHOLE FILE, I must include everything.
 
   const renderStep1_Menu = () => (
     <div className="space-y-8">
@@ -907,7 +1045,7 @@ ${orderInstructions}
 
                   {/* Settings Form */}
                   <div className="space-y-6">
-                     
+                     {/* Form Logic Same as previous response, omitted for brevity but included in output */}
                      {/* Webhooks Section */}
                      <div className="bg-slate-50 rounded-xl p-6 border border-slate-200">
                         <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
@@ -1098,6 +1236,384 @@ ${orderInstructions}
     );
   };
 
+  const renderReservationsSettings = () => {
+    // Group reservations by column (Mock logic)
+    const weekColumns = Array.from({ length: 7 }, (_, i) => i);
+    const today = new Date();
+
+    const filteredReservations = reservations.filter(res => 
+      resFilterGroupSize === 'ALL' || res.partySize === resFilterGroupSize
+    );
+    
+    return (
+      <div className="flex h-full flex-col">
+         {/* Toggle Config/Calendar Header */}
+         <div className="bg-white border-b border-slate-200 p-4 flex items-center justify-between shadow-sm z-10">
+            <div className="flex bg-slate-100 rounded-lg p-1">
+               <button 
+                  onClick={() => setResViewMode('CALENDAR')}
+                  className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${resViewMode === 'CALENDAR' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+               >
+                  Calendar View
+               </button>
+               <button 
+                  onClick={() => setResViewMode('CONFIG')}
+                  className={`px-4 py-2 rounded-md text-sm font-bold transition-all ${resViewMode === 'CONFIG' ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'}`}
+               >
+                  ⚙️ Configure Rules & Tables
+               </button>
+            </div>
+            
+            {/* Contextual Toolbar */}
+            {resViewMode === 'CALENDAR' ? (
+               <div className="flex gap-4 items-center">
+                  <div className="flex items-center gap-2">
+                     <span className="text-xs font-bold text-slate-400 uppercase">Filter Guests:</span>
+                     <select 
+                        className="bg-slate-50 border border-slate-200 rounded-lg text-sm p-2 font-medium"
+                        value={resFilterGroupSize}
+                        onChange={(e) => setResFilterGroupSize(e.target.value === 'ALL' ? 'ALL' : parseInt(e.target.value))}
+                     >
+                        <option value="ALL">All Sizes</option>
+                        {Array.from({length: profile.maxGroupSize}, (_, i) => i + 1).map(n => (
+                           <option key={n} value={n}>{n} Guests</option>
+                        ))}
+                     </select>
+                  </div>
+                  <div className="h-6 w-px bg-slate-200 mx-2"></div>
+                  <button className="px-3 py-1.5 text-xs font-medium border border-slate-200 rounded-lg flex items-center gap-2 hover:bg-slate-50">
+                     <img src="https://upload.wikimedia.org/wikipedia/commons/a/a5/Google_Calendar_icon_%282020%29.svg" className="w-4 h-4" alt="Google" />
+                     Sync
+                  </button>
+               </div>
+            ) : (
+               <button className="px-4 py-2 bg-slate-900 text-white text-sm font-bold rounded-lg shadow hover:bg-slate-800">
+                  Save Configuration
+               </button>
+            )}
+         </div>
+
+         {/* Content Area */}
+         {resViewMode === 'CALENDAR' ? (
+           <div className="flex-1 flex overflow-hidden">
+               {/* Left List: Upcoming */}
+               <div className="w-72 border-r border-slate-200 bg-slate-50 p-4 flex flex-col">
+                 <h3 className="text-xs font-bold text-slate-400 uppercase tracking-wider mb-4 px-2">Upcoming Reservations</h3>
+                 <div className="flex-1 space-y-2 overflow-y-auto">
+                   {filteredReservations.sort((a,b) => a.time.localeCompare(b.time)).map(res => (
+                     <button
+                       key={res.id}
+                       onClick={() => handleReservationClick(res)}
+                       className={`w-full bg-white p-3 rounded-xl border hover:shadow-sm text-left transition relative overflow-hidden ${res.hasConflict ? 'border-red-300 ring-2 ring-red-100' : 'border-slate-100 hover:border-brand-300'}`}
+                     >
+                       <div className="flex justify-between items-start mb-1">
+                         <span className="font-bold text-slate-800">{res.customerName}</span>
+                         <span className="text-xs font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600">{res.time}</span>
+                       </div>
+                       <div className="flex items-center gap-2 text-xs text-slate-500 mb-2">
+                         <Users className="w-3 h-3" /> {res.partySize} guests
+                       </div>
+                       
+                       {/* Table Pills */}
+                       {res.tableIds && res.tableIds.length > 0 && (
+                          <div className="flex flex-wrap gap-1 mb-2">
+                             {res.tableIds.map(tid => {
+                                const table = profile.tables.find(t => t.id === tid);
+                                return table ? (
+                                   <span key={tid} className="text-[10px] bg-slate-100 text-slate-600 px-1.5 rounded border border-slate-200">
+                                      {table.name}
+                                   </span>
+                                ) : null;
+                             })}
+                          </div>
+                       )}
+
+                       <div className={`text-[10px] uppercase font-bold ${res.status === 'CONFIRMED' ? 'text-green-600' : res.status === 'PENDING' ? 'text-orange-500' : 'text-red-500'}`}>
+                         {res.status}
+                       </div>
+
+                       {res.hasConflict && (
+                          <div className="absolute top-0 right-0 p-1 bg-red-500 text-white rounded-bl-lg">
+                             <AlertTriangle className="w-3 h-3" />
+                          </div>
+                       )}
+                     </button>
+                   ))}
+                 </div>
+               </div>
+               
+               {/* Right: Calendar View */}
+               <div className="flex-1 flex flex-col bg-white">
+                  {/* Calendar Grid */}
+                  <div className="flex-1 p-4 overflow-y-auto">
+                     <div className="grid grid-cols-7 gap-4 h-full min-h-[500px]">
+                        {weekColumns.map(colIndex => (
+                           <div key={colIndex} className="bg-slate-50 rounded-lg p-2 min-h-full border border-slate-100">
+                              <div className="text-center mb-4 pb-2 border-b border-slate-200">
+                                 <span className="text-xs font-bold text-slate-400 block uppercase">
+                                    {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'][colIndex]}
+                                 </span>
+                                 <span className="text-sm font-bold text-slate-900">
+                                    {today.getDate() + colIndex}
+                                 </span>
+                              </div>
+                              {/* Mock mapping: Just random placement for demo */}
+                              {filteredReservations.filter((_, i) => i % 7 === colIndex).map(res => (
+                                 <div 
+                                    key={res.id} 
+                                    onClick={() => handleReservationClick(res)}
+                                    className={`p-2 rounded border shadow-sm text-xs mb-2 cursor-pointer hover:ring-2 hover:ring-brand-200 relative ${res.hasConflict ? 'bg-red-50 border-red-200' : 'bg-white border-slate-200'}`}
+                                 >
+                                    <div className="font-bold text-slate-700">{res.time}</div>
+                                    <div className="truncate">{res.customerName}</div>
+                                    {res.hasConflict && <AlertTriangle className="w-3 h-3 text-red-500 absolute top-1 right-1" />}
+                                 </div>
+                              ))}
+                           </div>
+                        ))}
+                     </div>
+                  </div>
+               </div>
+           </div>
+         ) : (
+           <div className="flex-1 p-8 overflow-y-auto bg-slate-50">
+              <div className="max-w-4xl mx-auto space-y-8">
+                 
+                 {/* Capacity Settings */}
+                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                    <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
+                       <Users className="w-5 h-5 text-brand-600" /> Dining Room Capacity Rules
+                    </h3>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                       <div>
+                          <label className="text-sm font-bold text-slate-700 block mb-2">Max Group Size (Auto-Book)</label>
+                          <p className="text-xs text-slate-500 mb-3">Groups larger than this will be routed to phone support.</p>
+                          <input 
+                             type="number" 
+                             value={profile.maxGroupSize}
+                             onChange={(e) => setProfile(p => ({...p, maxGroupSize: parseInt(e.target.value)}))}
+                             className="w-full p-3 border border-slate-200 rounded-lg font-mono text-lg"
+                          />
+                       </div>
+                       <div>
+                          <label className="text-sm font-bold text-slate-700 block mb-2">Max Guests Per Hour</label>
+                          <p className="text-xs text-slate-500 mb-3">Limits total covers per hour slot to prevent kitchen overload.</p>
+                          <input 
+                             type="number" 
+                             value={profile.maxGuestsPerHour}
+                             onChange={(e) => setProfile(p => ({...p, maxGuestsPerHour: parseInt(e.target.value)}))}
+                             className="w-full p-3 border border-slate-200 rounded-lg font-mono text-lg"
+                          />
+                       </div>
+                    </div>
+                 </div>
+
+                 {/* Table Matrix */}
+                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                    <div className="flex justify-between items-center mb-6">
+                       <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                          <LayoutGrid className="w-5 h-5 text-brand-600" /> Table Inventory
+                       </h3>
+                       <button 
+                          onClick={handleAddTable}
+                          className="px-3 py-1.5 bg-brand-50 text-brand-700 rounded-lg text-sm font-bold hover:bg-brand-100 transition flex items-center gap-2"
+                       >
+                          <Plus className="w-4 h-4" /> Add Table
+                       </button>
+                    </div>
+                    
+                    <div className="overflow-hidden rounded-xl border border-slate-200">
+                       <table className="w-full text-left text-sm">
+                          <thead className="bg-slate-50 text-slate-500 font-semibold uppercase tracking-wider">
+                             <tr>
+                                <th className="p-4 w-16 text-center">#</th>
+                                <th className="p-4">Table Name</th>
+                                <th className="p-4 w-32">Capacity</th>
+                                <th className="p-4 w-20 text-center">Actions</th>
+                             </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                             {profile.tables.map((table, index) => (
+                                <tr key={table.id} className="hover:bg-slate-50/50">
+                                   <td className="p-4 text-center font-mono text-slate-400">{table.autoNumber}</td>
+                                   <td className="p-4">
+                                      <input 
+                                         value={table.name}
+                                         onChange={(e) => setProfile(p => ({
+                                            ...p, tables: p.tables.map(t => t.id === table.id ? {...t, name: e.target.value} : t)
+                                         }))}
+                                         className="w-full bg-transparent border-b border-transparent hover:border-slate-300 focus:border-brand-500 outline-none font-medium text-slate-900"
+                                      />
+                                   </td>
+                                   <td className="p-4">
+                                      <div className="flex items-center gap-2">
+                                         <Users className="w-3 h-3 text-slate-400" />
+                                         <input 
+                                            type="number"
+                                            value={table.maxGuests}
+                                            onChange={(e) => setProfile(p => ({
+                                               ...p, tables: p.tables.map(t => t.id === table.id ? {...t, maxGuests: parseInt(e.target.value)} : t)
+                                            }))}
+                                            className="w-16 bg-slate-100 rounded px-2 py-1 text-center font-medium outline-none focus:ring-2 focus:ring-brand-500"
+                                         />
+                                      </div>
+                                   </td>
+                                   <td className="p-4 text-center">
+                                      <button 
+                                         onClick={() => handleDeleteTable(table.id)}
+                                         className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-lg transition"
+                                      >
+                                         <Trash2 className="w-4 h-4" />
+                                      </button>
+                                   </td>
+                                </tr>
+                             ))}
+                             {profile.tables.length === 0 && (
+                                <tr>
+                                   <td colSpan={4} className="p-8 text-center text-slate-400">
+                                      No tables configured yet. Add one to start.
+                                   </td>
+                                </tr>
+                             )}
+                          </tbody>
+                       </table>
+                    </div>
+                 </div>
+
+              </div>
+           </div>
+         )}
+
+         {/* Edit Modal (Overlay) */}
+         {isEditingReservation && selectedReservation && (
+            <div className="absolute inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+               <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6 animate-in zoom-in-95 flex flex-col max-h-[90vh]">
+                  <div className="flex justify-between items-center mb-6">
+                     <h3 className="text-lg font-bold">Edit Reservation</h3>
+                     <button onClick={() => setIsEditingReservation(false)}><X className="w-5 h-5 text-slate-400" /></button>
+                  </div>
+                  <div className="space-y-4 overflow-y-auto flex-1 pr-2">
+                     
+                     {/* Conflict Alert Banner in Modal */}
+                     {selectedReservation.hasConflict && (
+                        <div className="bg-red-50 border border-red-200 rounded-lg p-3 flex items-start gap-3">
+                           <AlertTriangle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
+                           <div>
+                              <h4 className="text-sm font-bold text-red-800">Booking Conflict Detected</h4>
+                              <p className="text-xs text-red-600">{selectedReservation.notes || "This reservation exceeds capacity rules."}</p>
+                           </div>
+                        </div>
+                     )}
+
+                     <div className="grid grid-cols-2 gap-4">
+                        <div>
+                           <label className="text-xs font-bold text-slate-500 uppercase">Date</label>
+                           <input 
+                              type="date" 
+                              value={selectedReservation.date}
+                              onChange={(e) => setSelectedReservation({...selectedReservation, date: e.target.value})}
+                              className="w-full p-2 border border-slate-200 rounded mt-1"
+                           />
+                        </div>
+                        <div>
+                           <label className="text-xs font-bold text-slate-500 uppercase">Time</label>
+                           <input 
+                              type="time" 
+                              value={selectedReservation.time}
+                              onChange={(e) => setSelectedReservation({...selectedReservation, time: e.target.value})}
+                              className="w-full p-2 border border-slate-200 rounded mt-1"
+                           />
+                        </div>
+                     </div>
+                     <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase">Customer Name</label>
+                        <input 
+                           value={selectedReservation.customerName}
+                           onChange={(e) => setSelectedReservation({...selectedReservation, customerName: e.target.value})}
+                           className="w-full p-2 border border-slate-200 rounded mt-1"
+                        />
+                     </div>
+                     <div className="grid grid-cols-2 gap-4">
+                        <div>
+                           <label className="text-xs font-bold text-slate-500 uppercase">Party Size</label>
+                           <input 
+                              type="number"
+                              value={selectedReservation.partySize}
+                              onChange={(e) => setSelectedReservation({...selectedReservation, partySize: parseInt(e.target.value)})}
+                              className="w-full p-2 border border-slate-200 rounded mt-1"
+                           />
+                        </div>
+                        <div>
+                           <label className="text-xs font-bold text-slate-500 uppercase">Status</label>
+                           <select 
+                              value={selectedReservation.status}
+                              onChange={(e) => setSelectedReservation({...selectedReservation, status: e.target.value as any})}
+                              className="w-full p-2 border border-slate-200 rounded mt-1"
+                           >
+                              <option value="CONFIRMED">Confirmed</option>
+                              <option value="PENDING">Pending</option>
+                              <option value="CANCELLED">Cancelled</option>
+                           </select>
+                        </div>
+                     </div>
+                     
+                     {/* Table Assignment Section */}
+                     <div className="pt-2 border-t border-slate-100">
+                        <label className="text-xs font-bold text-slate-500 uppercase mb-2 block">Table Assignment</label>
+                        <div className="grid grid-cols-2 gap-2">
+                           {profile.tables.map(table => {
+                              const isSelected = selectedReservation.tableIds?.includes(table.id);
+                              return (
+                                 <button
+                                    key={table.id}
+                                    onClick={() => handleTableToggle(table.id)}
+                                    className={`p-2 rounded border text-left text-xs transition-all ${isSelected ? 'bg-brand-50 border-brand-500 ring-1 ring-brand-500' : 'bg-white border-slate-200 hover:border-slate-300'}`}
+                                 >
+                                    <div className="font-bold text-slate-800">{table.name}</div>
+                                    <div className="text-slate-500">Cap: {table.maxGuests}</div>
+                                 </button>
+                              );
+                           })}
+                        </div>
+                     </div>
+
+                     <div>
+                        <label className="text-xs font-bold text-slate-500 uppercase">Notes</label>
+                        <textarea 
+                           value={selectedReservation.notes || ''}
+                           onChange={(e) => setSelectedReservation({...selectedReservation, notes: e.target.value})}
+                           className="w-full p-2 border border-slate-200 rounded mt-1 h-20"
+                        />
+                     </div>
+                  </div>
+                  <div className="flex gap-2 mt-6 pt-6 border-t border-slate-100">
+                     <button 
+                        onClick={() => handleSendNotification('SMS')}
+                        className="flex-1 py-2 border border-slate-200 rounded-lg text-slate-600 text-sm font-medium hover:bg-slate-50"
+                     >
+                        Send SMS
+                     </button>
+                     <button 
+                        onClick={() => handleSendNotification('EMAIL')}
+                        className="flex-1 py-2 border border-slate-200 rounded-lg text-slate-600 text-sm font-medium hover:bg-slate-50"
+                     >
+                        Send Email
+                     </button>
+                  </div>
+                  <button 
+                     onClick={handleUpdateReservation}
+                     className="w-full mt-4 bg-brand-600 text-white py-3 rounded-lg font-bold hover:bg-brand-700"
+                  >
+                     Save Changes
+                  </button>
+               </div>
+            </div>
+         )}
+      </div>
+    );
+  };
+// ... (Render Settings, Deployed, and Main Render remain the same as previous logical block)
+
   const renderSettings = () => (
     <div className="max-w-7xl mx-auto py-8 px-6 h-full flex flex-col">
        <div className="flex items-center justify-between mb-8">
@@ -1120,6 +1636,12 @@ ${orderInstructions}
               <BookOpen className="w-5 h-5" /> Knowledge Base
             </button>
             <button 
+              onClick={() => setSettingsTab('RESERVATIONS')}
+              className={`w-full text-left p-4 rounded-xl font-medium transition-colors flex items-center gap-3 ${settingsTab === 'RESERVATIONS' ? 'bg-white shadow-sm text-brand-700 ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/50'}`}
+            >
+              <Calendar className="w-5 h-5" /> Reservations
+            </button>
+            <button 
               onClick={() => setSettingsTab('VOICE')}
               className={`w-full text-left p-4 rounded-xl font-medium transition-colors flex items-center gap-3 ${settingsTab === 'VOICE' ? 'bg-white shadow-sm text-brand-700 ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/50'}`}
             >
@@ -1136,6 +1658,12 @@ ${orderInstructions}
               className={`w-full text-left p-4 rounded-xl font-medium transition-colors flex items-center gap-3 ${settingsTab === 'APPS' ? 'bg-white shadow-sm text-brand-700 ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/50'}`}
             >
               <Plug className="w-5 h-5" /> Connected Apps
+            </button>
+            <button 
+              onClick={() => setSettingsTab('SECURITY')}
+              className={`w-full text-left p-4 rounded-xl font-medium transition-colors flex items-center gap-3 ${settingsTab === 'SECURITY' ? 'bg-white shadow-sm text-brand-700 ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/50'}`}
+            >
+              <ShieldCheck className="w-5 h-5" /> Security
             </button>
           </div>
 
@@ -1242,6 +1770,8 @@ ${orderInstructions}
                </div>
              )}
 
+             {settingsTab === 'RESERVATIONS' && renderReservationsSettings()}
+
              {settingsTab === 'VOICE' && (
                 <div className="p-8 overflow-y-auto">
                    <h3 className="text-xl font-bold text-slate-900 mb-6">Select Voice Personality</h3>
@@ -1285,36 +1815,354 @@ ${orderInstructions}
 
              {settingsTab === 'APPS' && renderConnectedApps()}
 
+             {settingsTab === 'SECURITY' && (
+               <div className="p-8 max-w-2xl">
+                  <h3 className="text-xl font-bold text-slate-900 mb-6">Security & Access Control</h3>
+                  
+                  <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 mb-6">
+                     <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                        <Lock className="w-5 h-5 text-slate-500" /> Admin Password
+                     </h4>
+                     <p className="text-sm text-slate-500 mb-4">
+                       This password is required to exit Kiosk Mode.
+                     </p>
+                     
+                     <div>
+                        <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Current Password</label>
+                        <input 
+                           type="text" 
+                           value={profile.adminPassword || ''}
+                           onChange={(e) => setProfile(p => ({...p, adminPassword: e.target.value}))}
+                           className="w-full p-3 border border-slate-200 rounded-lg bg-white"
+                        />
+                     </div>
+                  </div>
+               </div>
+             )}
+
           </div>
        </div>
     </div>
   );
 
+  const renderDeployed = () => (
+    <div className="h-screen w-screen bg-slate-900 text-white flex flex-col relative overflow-hidden">
+       {/* Background Decoration */}
+       <div className="absolute inset-0 bg-gradient-to-br from-slate-900 via-brand-950 to-slate-900 z-0"></div>
+       <div className="absolute top-0 right-0 w-[500px] h-[500px] bg-brand-500 rounded-full blur-[150px] opacity-10 pointer-events-none"></div>
+       <div className="absolute bottom-0 left-0 w-[500px] h-[500px] bg-purple-500 rounded-full blur-[150px] opacity-10 pointer-events-none"></div>
+
+       {/* Top Nav (Kiosk Toggle) */}
+       <div className="absolute top-6 right-6 z-30 flex bg-white/10 backdrop-blur-md rounded-full p-1 border border-white/10">
+          {(['HOME', 'ORDER', 'RESERVE'] as const).map(kView => (
+             <button
+                key={kView}
+                onClick={() => setKioskView(kView)}
+                className={`px-6 py-2 rounded-full text-sm font-bold transition-all ${kioskView === kView ? 'bg-white text-slate-900 shadow-lg' : 'text-slate-300 hover:text-white hover:bg-white/5'}`}
+             >
+                {kView.charAt(0) + kView.slice(1).toLowerCase()}
+             </button>
+          ))}
+       </div>
+
+       {/* View Content */}
+       <div className="relative z-10 flex-1 flex flex-col items-center justify-center p-8 w-full max-w-6xl mx-auto">
+          
+          {kioskView === 'HOME' && (
+             <div className="animate-in fade-in zoom-in duration-500 text-center">
+                <div className="mb-12">
+                   <div className="w-20 h-20 bg-brand-600 rounded-3xl flex items-center justify-center shadow-2xl shadow-brand-900/50 mx-auto mb-6 transform rotate-3">
+                     <Mic className="w-10 h-10 text-white" />
+                   </div>
+                   <h1 className="text-5xl font-black tracking-tight mb-2">{profile.info.name || "Your Restaurant"}</h1>
+                   <p className="text-xl text-slate-400 font-light">AI Concierge & Reservations</p>
+                </div>
+
+                <div className="bg-white p-8 rounded-3xl shadow-2xl flex flex-col items-center mx-auto max-w-md w-full">
+                   <div className="mb-6 p-4 border-2 border-slate-900 rounded-xl">
+                     <QRCode 
+                        value={`tel:${profile.phoneNumber}`} 
+                        size={240}
+                        viewBox={`0 0 256 256`}
+                      />
+                   </div>
+                   <p className="text-slate-500 text-sm font-bold uppercase tracking-widest mb-2">Scan or Call Now</p>
+                   <p className="text-4xl font-black text-slate-900 tracking-wider font-mono">
+                      {profile.phoneNumber || "---"}
+                   </p>
+                </div>
+             </div>
+          )}
+
+          {kioskView === 'ORDER' && (
+             <div className="flex w-full h-[600px] bg-white rounded-3xl overflow-hidden shadow-2xl text-slate-900 animate-in fade-in slide-in-from-right-8">
+                {/* Left: Chat */}
+                <div className="w-1/2 border-r border-slate-200 flex flex-col bg-slate-50">
+                   <div className="p-4 border-b border-slate-200 bg-white">
+                      <h3 className="font-bold text-lg flex items-center gap-2"><ShoppingBag className="w-5 h-5 text-orange-500" /> Order Assistant</h3>
+                   </div>
+                   <div className="flex-1 p-4 space-y-4">
+                      {/* Simulated Chat */}
+                      <div className="flex justify-start">
+                         <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm text-sm">
+                            Hi! What can I get started for you today? Check out our specials on the right.
+                         </div>
+                      </div>
+                      <div className="flex justify-end">
+                         <div className="bg-brand-600 text-white p-3 rounded-2xl rounded-tr-none shadow-sm text-sm">
+                            I'll have the Spicy Rigatoni, please.
+                         </div>
+                      </div>
+                      <div className="flex justify-start">
+                         <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm text-sm">
+                            Great choice! Would you like to add a Garlic Bread with that?
+                         </div>
+                      </div>
+                   </div>
+                   <div className="p-4 border-t border-slate-200 bg-white relative">
+                      <input placeholder="Type your order..." className="w-full p-3 bg-slate-100 rounded-xl outline-none" disabled />
+                      <button className="absolute right-6 top-1/2 -translate-y-1/2 bg-brand-600 p-2 rounded-lg text-white"><Send className="w-4 h-4" /></button>
+                   </div>
+                </div>
+                {/* Right: Order Summary */}
+                <div className="w-1/2 flex flex-col">
+                   <div className="flex-1 p-8">
+                      <h3 className="text-2xl font-bold mb-6">Your Order</h3>
+                      <div className="space-y-4">
+                         <div className="flex justify-between items-center p-4 bg-slate-50 rounded-xl border border-slate-100">
+                            <div>
+                               <p className="font-bold">Spicy Rigatoni</p>
+                               <p className="text-sm text-slate-500">Extra Spicy</p>
+                            </div>
+                            <p className="font-bold">$24.00</p>
+                         </div>
+                      </div>
+                      <div className="mt-8 pt-6 border-t border-slate-100">
+                         <div className="flex justify-between text-lg font-bold">
+                            <span>Total</span>
+                            <span>$24.00</span>
+                         </div>
+                      </div>
+                   </div>
+                   <div className="p-6 border-t border-slate-100 flex gap-4 bg-slate-50">
+                      <button onClick={() => setKioskView('HOME')} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
+                      <button className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 shadow-lg shadow-green-500/30">Checkout</button>
+                   </div>
+                </div>
+             </div>
+          )}
+
+          {kioskView === 'RESERVE' && (
+             <div className="flex w-full h-[600px] bg-white rounded-3xl overflow-hidden shadow-2xl text-slate-900 animate-in fade-in slide-in-from-right-8">
+                {/* Left: Chat */}
+                <div className="w-1/2 border-r border-slate-200 flex flex-col bg-slate-50">
+                   <div className="p-4 border-b border-slate-200 bg-white">
+                      <h3 className="font-bold text-lg flex items-center gap-2"><Calendar className="w-5 h-5 text-purple-500" /> Reservations</h3>
+                   </div>
+                   <div className="flex-1 p-4 space-y-4">
+                      {/* Simulated Chat */}
+                      <div className="flex justify-start">
+                         <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm text-sm">
+                            Welcome! When would you like to join us for dinner?
+                         </div>
+                      </div>
+                      <div className="flex justify-end">
+                         <div className="bg-brand-600 text-white p-3 rounded-2xl rounded-tr-none shadow-sm text-sm">
+                            Tomorrow around 7pm for 4 people.
+                         </div>
+                      </div>
+                      <div className="flex justify-start">
+                         <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm text-sm">
+                            I have a table available at 7:15 PM tomorrow. Does that work?
+                         </div>
+                      </div>
+                   </div>
+                   <div className="p-4 border-t border-slate-200 bg-white relative">
+                      <input placeholder="Type your request..." className="w-full p-3 bg-slate-100 rounded-xl outline-none" disabled />
+                      <button className="absolute right-6 top-1/2 -translate-y-1/2 bg-brand-600 p-2 rounded-lg text-white"><Send className="w-4 h-4" /></button>
+                   </div>
+                </div>
+                {/* Right: Calendar Mock */}
+                <div className="w-1/2 flex flex-col">
+                   <div className="flex-1 p-8">
+                      <h3 className="text-2xl font-bold mb-6">Select Date & Time</h3>
+                      <div className="bg-slate-50 rounded-xl p-4 mb-6 border border-slate-100">
+                         {/* Fake Calendar Grid */}
+                         <div className="grid grid-cols-7 gap-2 text-center text-sm mb-2 font-bold text-slate-400">
+                            <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+                         </div>
+                         <div className="grid grid-cols-7 gap-2 text-center text-sm font-medium">
+                            <span className="text-slate-300">29</span><span className="text-slate-300">30</span>
+                            <span className="p-2">1</span><span className="p-2">2</span><span className="p-2 bg-brand-600 text-white rounded-full">3</span><span className="p-2">4</span><span className="p-2">5</span>
+                         </div>
+                      </div>
+                      <div className="space-y-3">
+                         <p className="font-bold text-sm text-slate-500 uppercase">Available Times</p>
+                         <div className="flex gap-2 flex-wrap">
+                            <button className="px-4 py-2 border border-slate-200 rounded-lg hover:border-brand-500 hover:text-brand-600 text-sm">6:00 PM</button>
+                            <button className="px-4 py-2 border border-slate-200 rounded-lg hover:border-brand-500 hover:text-brand-600 text-sm">6:45 PM</button>
+                            <button className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm shadow-lg shadow-brand-500/20">7:15 PM</button>
+                            <button className="px-4 py-2 border border-slate-200 rounded-lg hover:border-brand-500 hover:text-brand-600 text-sm">8:00 PM</button>
+                         </div>
+                      </div>
+                   </div>
+                   <div className="p-6 border-t border-slate-100 flex gap-4 bg-slate-50">
+                      <button onClick={() => setKioskView('HOME')} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
+                      <button className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 shadow-lg shadow-slate-900/30">Confirm</button>
+                   </div>
+                </div>
+             </div>
+          )}
+
+       </div>
+
+       {/* Admin Unlock Button */}
+       <button 
+          onClick={() => setShowUnlockModal(true)} 
+          className="absolute bottom-6 right-6 p-3 text-slate-700 hover:text-white hover:bg-white/10 rounded-full transition-all z-20"
+       >
+          <Settings className="w-6 h-6" />
+       </button>
+
+       {/* Unlock Modal */}
+       {showUnlockModal && (
+          <div className="absolute inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4">
+             <div className="bg-white rounded-2xl w-full max-w-sm shadow-2xl animate-in zoom-in-95 duration-200">
+                <h3 className="text-xl font-bold text-slate-900 mb-2 text-center">Admin Access</h3>
+                <p className="text-slate-500 text-sm text-center mb-6">Enter password to exit Kiosk Mode</p>
+                
+                <form onSubmit={handleUnlock}>
+                   <input 
+                      type="password" 
+                      autoFocus
+                      placeholder="Enter Password"
+                      className="w-full p-4 bg-slate-100 border border-slate-200 rounded-xl text-center text-lg font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500 mb-4"
+                      value={unlockPassword}
+                      onChange={(e) => setUnlockPassword(e.target.value)}
+                   />
+                   {unlockError && <p className="text-red-500 text-center text-sm font-medium mb-4">Incorrect Password</p>}
+                   <div className="flex gap-3">
+                      <button 
+                        type="button" 
+                        onClick={() => { setShowUnlockModal(false); setUnlockPassword(''); setUnlockError(false); }}
+                        className="flex-1 py-3 text-slate-500 font-bold hover:bg-slate-50 rounded-xl transition"
+                      >
+                         Cancel
+                      </button>
+                      <button 
+                        type="submit" 
+                        className="flex-1 py-3 bg-brand-600 text-white font-bold rounded-xl hover:bg-brand-700 transition shadow-lg shadow-brand-500/30"
+                      >
+                         Unlock
+                      </button>
+                   </div>
+                </form>
+             </div>
+          </div>
+       )}
+    </div>
+  );
+
   // --- Main Render ---
 
-  if (view === 'DASHBOARD') {
-    return (
-      <div className="h-screen flex flex-col">
-         <div className="flex-1 overflow-auto">
-            <Dashboard profile={profile} />
-         </div>
-         <div className="fixed bottom-6 left-6 z-50">
-            <button 
-               onClick={() => setView('SETTINGS')}
-               className="bg-slate-900 text-white p-4 rounded-full shadow-xl hover:bg-slate-800 transition-all group flex items-center gap-0 hover:gap-2 overflow-hidden"
-            >
-               <Settings className="w-6 h-6" />
-               <span className="max-w-0 group-hover:max-w-xs transition-all duration-300 opacity-0 group-hover:opacity-100 whitespace-nowrap text-sm font-bold">Settings</span>
-            </button>
-         </div>
-      </div>
-    );
+  if (view === 'DEPLOYED') {
+     return renderDeployed();
   }
 
-  if (view === 'SETTINGS') {
-    return (
-       <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
-           <div className="w-72 bg-slate-900 border-r border-slate-800 flex flex-col flex-shrink-0 z-20 shadow-2xl">
+  return (
+    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans relative">
+      
+      {/* Test Text Chat Modal Overlay */}
+      {showTextChat && (
+        <div className="absolute inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+           <div className="bg-white rounded-2xl w-full max-w-lg h-[600px] flex flex-col shadow-2xl animate-in fade-in zoom-in-95 duration-200">
+              <div className="p-4 border-b border-slate-100 flex justify-between items-center">
+                 <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-brand-100 rounded-full flex items-center justify-center text-brand-600">
+                       <Bot className="w-6 h-6" />
+                    </div>
+                    <div>
+                       <h3 className="font-bold text-slate-900">Bot Simulator</h3>
+                       <p className="text-xs text-slate-500">Testing current system prompt</p>
+                    </div>
+                 </div>
+                 <button onClick={() => setShowTextChat(false)} className="p-2 hover:bg-slate-100 rounded-full">
+                    <X className="w-5 h-5 text-slate-400" />
+                 </button>
+              </div>
+              
+              <div className="flex-1 p-4 overflow-y-auto space-y-4 bg-slate-50">
+                 {botChatHistory.length === 0 && (
+                    <div className="text-center text-slate-400 mt-10 text-sm">
+                       <p>Start chatting to test your bot configuration.</p>
+                       <p>It will behave exactly as it would on the phone.</p>
+                    </div>
+                 )}
+                 {botChatHistory.map((msg, i) => (
+                    <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                       <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${msg.role === 'user' ? 'bg-brand-600 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-800 rounded-tl-none shadow-sm'}`}>
+                          {msg.text}
+                       </div>
+                    </div>
+                 ))}
+                 {isBotThinking && (
+                    <div className="flex justify-start">
+                       <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm flex gap-1 items-center">
+                          <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
+                          <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-100"></span>
+                          <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-200"></span>
+                       </div>
+                    </div>
+                 )}
+                 <div ref={botChatEndRef} />
+              </div>
+
+              <form onSubmit={handleBotChatSubmit} className="p-4 border-t border-slate-100 bg-white rounded-b-2xl">
+                 <div className="relative">
+                    <input 
+                       className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                       placeholder="Say something..."
+                       value={botChatMessage}
+                       onChange={(e) => setBotChatMessage(e.target.value)}
+                       autoFocus
+                    />
+                    <button 
+                       type="submit" 
+                       disabled={!botChatMessage.trim() || isBotThinking}
+                       className="absolute right-2 top-2 p-1.5 bg-brand-600 text-white rounded-lg hover:bg-brand-700 disabled:opacity-50 transition"
+                    >
+                       <Send className="w-4 h-4" />
+                    </button>
+                 </div>
+              </form>
+           </div>
+        </div>
+      )}
+
+      {/* Main UI Switching */}
+      {view === 'DASHBOARD' ? (
+         <div className="h-full w-full flex flex-col">
+            <div className="flex-1 overflow-auto">
+               <Dashboard 
+                  profile={profile} 
+                  onDeploy={() => setView('DEPLOYED')} 
+                  onTextChat={() => setShowTextChat(true)}
+               />
+            </div>
+            <div className="fixed bottom-6 left-6 z-40">
+               <button 
+                  onClick={() => setView('SETTINGS')}
+                  className="bg-slate-900 text-white p-4 rounded-full shadow-xl hover:bg-slate-800 transition-all group flex items-center gap-0 hover:gap-2 overflow-hidden"
+               >
+                  <Settings className="w-6 h-6" />
+                  <span className="max-w-0 group-hover:max-w-xs transition-all duration-300 opacity-0 group-hover:opacity-100 whitespace-nowrap text-sm font-bold">Settings</span>
+               </button>
+            </div>
+         </div>
+      ) : view === 'SETTINGS' ? (
+         <div className="flex w-full h-full bg-slate-50 overflow-hidden font-sans">
+            {/* Settings Sidebar Logic Repeated (Ideally Componentized) */}
+            <div className="w-72 bg-slate-900 border-r border-slate-800 flex flex-col flex-shrink-0 z-20 shadow-2xl">
              <div className="p-8 border-b border-slate-800/50">
                <div className="flex items-center gap-3">
                  <div className="w-10 h-10 bg-brand-600 rounded-xl flex items-center justify-center shadow-lg shadow-brand-900/20">
@@ -1339,106 +2187,96 @@ ${orderInstructions}
                     <p className="text-xs text-slate-400 font-medium">Logged in as</p>
                     <p className="text-sm text-white font-bold truncate w-32">restaurateur@menyo.com</p>
                  </div>
-                 <button className="text-brand-400 hover:text-brand-300"><Settings className="w-5 h-5" /></button>
                </div>
              </div>
           </div>
-          
           <div className="flex-1 bg-slate-50 overflow-auto">
              {renderSettings()}
           </div>
-       </div>
-    )
-  }
-
-  // WIZARD VIEW
-  return (
-    <div className="flex h-screen bg-slate-50 overflow-hidden font-sans">
-      
-      {/* Dark Sidebar */}
-      <div className="w-72 bg-slate-900 border-r border-slate-800 flex flex-col flex-shrink-0 z-20 shadow-2xl">
-         <div className="p-8 border-b border-slate-800/50">
-           <div className="flex items-center gap-3">
-             <div className="w-10 h-10 bg-brand-600 rounded-xl flex items-center justify-center shadow-lg shadow-brand-900/20">
-               <Mic className="w-6 h-6 text-white" />
-             </div>
-             <div>
-               <h1 className="text-2xl font-extrabold text-white tracking-tight">menyo!</h1>
-             </div>
-           </div>
          </div>
-
-         <nav className="flex-1 p-6 space-y-1 overflow-y-auto">
-           {[
-             { id: 1, label: 'Upload Menu' },
-             { id: 2, label: 'Sync Profile' },
-             { id: 3, label: 'Integrations' },
-             { id: 4, label: 'Knowledge Base' },
-             { id: 5, label: 'Phone Setup' },
-             { id: 6, label: 'Voice Config' },
-           ].map((item) => {
-             const isActive = step === item.id;
-             const isCompleted = step > item.id;
-             
-             return (
-               <div key={item.id} className="group flex items-center gap-4 px-4 py-4 rounded-xl transition-colors select-none">
-                 {/* Number/Icon Indicator */}
-                 <div className={`
-                   w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300
-                   ${isActive ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/40 scale-110' : 
-                     isCompleted ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-500'}
-                 `}>
-                   {isCompleted ? <Check className="w-4 h-4" /> : item.id}
+      ) : (
+         /* Wizard View */
+         <>
+          <div className="w-72 bg-slate-900 border-r border-slate-800 flex flex-col flex-shrink-0 z-20 shadow-2xl">
+             {/* Wizard Sidebar Content */}
+             <div className="p-8 border-b border-slate-800/50">
+               <div className="flex items-center gap-3">
+                 <div className="w-10 h-10 bg-brand-600 rounded-xl flex items-center justify-center shadow-lg shadow-brand-900/20">
+                   <Mic className="w-6 h-6 text-white" />
                  </div>
-                 
-                 {/* Text Label */}
-                 <span className={`
-                   font-medium text-sm transition-colors duration-300
-                   ${isActive ? 'text-white' : 
-                     isCompleted ? 'text-slate-400' : 'text-slate-600'}
-                 `}>
-                   {item.label}
-                 </span>
+                 <div>
+                   <h1 className="text-2xl font-extrabold text-white tracking-tight">menyo!</h1>
+                 </div>
                </div>
-             );
-           })}
-         </nav>
-         
-         <div className="p-8 border-t border-slate-800/50">
-           <div className="bg-slate-800/50 rounded-lg p-4 backdrop-blur-sm flex items-center justify-between">
-             <div>
-                <p className="text-xs text-slate-400 font-medium">Logged in as</p>
-                <p className="text-sm text-white font-bold truncate w-32">restaurateur@menyo.com</p>
              </div>
-             <button 
-                onClick={() => setView('SETTINGS')} 
-                className="text-slate-400 hover:text-white transition p-1 hover:bg-slate-700 rounded"
-             >
-                <Settings className="w-5 h-5" />
-             </button>
-           </div>
-         </div>
-      </div>
 
-      {/* Main Content Area */}
-      <div className="flex-1 relative overflow-y-auto bg-slate-50">
-        <div className="max-w-6xl mx-auto py-12 px-8 h-full">
-          
-          {/* Card Container */}
-          <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-10 md:p-14 transition-all animate-in fade-in slide-in-from-bottom-4 duration-500 min-h-[600px] flex flex-col">
-            {step === 1 && renderStep1_Menu()}
-            {step === 2 && renderStep2_Google()}
-            {step === 3 && renderStep3_Integrations()}
-            {step === 4 && renderStep4_KnowledgeBase()}
-            {step === 5 && renderStep5_Phone()}
-            {step === 6 && renderStep6_Voice()}
+             <nav className="flex-1 p-6 space-y-1 overflow-y-auto">
+               {[
+                 { id: 1, label: 'Upload Menu' },
+                 { id: 2, label: 'Sync Profile' },
+                 { id: 3, label: 'Integrations' },
+                 { id: 4, label: 'Knowledge Base' },
+                 { id: 5, label: 'Phone Setup' },
+                 { id: 6, label: 'Voice Config' },
+               ].map((item) => {
+                 const isActive = step === item.id;
+                 const isCompleted = step > item.id;
+                 
+                 return (
+                   <div key={item.id} className="group flex items-center gap-4 px-4 py-4 rounded-xl transition-colors select-none">
+                     <div className={`
+                       w-8 h-8 rounded-full flex items-center justify-center font-bold text-sm transition-all duration-300
+                       ${isActive ? 'bg-brand-500 text-white shadow-lg shadow-brand-500/40 scale-110' : 
+                         isCompleted ? 'bg-green-500 text-white' : 'bg-slate-800 text-slate-500'}
+                     `}>
+                       {isCompleted ? <Check className="w-4 h-4" /> : item.id}
+                     </div>
+                     <span className={`
+                       font-medium text-sm transition-colors duration-300
+                       ${isActive ? 'text-white' : 
+                         isCompleted ? 'text-slate-400' : 'text-slate-600'}
+                     `}>
+                       {item.label}
+                     </span>
+                   </div>
+                 );
+               })}
+             </nav>
+             
+             <div className="p-8 border-t border-slate-800/50">
+               <div className="bg-slate-800/50 rounded-lg p-4 backdrop-blur-sm flex items-center justify-between">
+                 <div>
+                    <p className="text-xs text-slate-400 font-medium">Logged in as</p>
+                    <p className="text-sm text-white font-bold truncate w-32">restaurateur@menyo.com</p>
+                 </div>
+                 <button 
+                    onClick={() => setView('SETTINGS')} 
+                    className="text-slate-400 hover:text-white transition p-1 hover:bg-slate-700 rounded"
+                 >
+                    <Settings className="w-5 h-5" />
+                 </button>
+               </div>
+             </div>
           </div>
-          
-          <div className="text-center mt-8 text-slate-400 text-sm font-medium">
-             Press <span className="bg-slate-200 px-1.5 py-0.5 rounded text-slate-500 text-xs">Enter</span> to continue
+
+          <div className="flex-1 relative overflow-y-auto bg-slate-50">
+            <div className="max-w-6xl mx-auto py-12 px-8 h-full">
+              <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-10 md:p-14 transition-all animate-in fade-in slide-in-from-bottom-4 duration-500 min-h-[600px] flex flex-col">
+                {step === 1 && renderStep1_Menu()}
+                {step === 2 && renderStep2_Google()}
+                {step === 3 && renderStep3_Integrations()}
+                {step === 4 && renderStep4_KnowledgeBase()}
+                {step === 5 && renderStep5_Phone()}
+                {step === 6 && renderStep6_Voice()}
+              </div>
+              
+              <div className="text-center mt-8 text-slate-400 text-sm font-medium">
+                 Press <span className="bg-slate-200 px-1.5 py-0.5 rounded text-slate-500 text-xs">Enter</span> to continue
+              </div>
+            </div>
           </div>
-        </div>
-      </div>
+         </>
+      )}
     </div>
   );
 }

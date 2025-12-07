@@ -132,7 +132,30 @@ export class GeminiService {
     }
   }
 
-  // 3. Live API Connection
+  // 3. Test Bot Chat (Text Mode)
+  async sendChatMessage(
+    history: { role: string; parts: { text: string }[] }[],
+    systemInstruction: string,
+    message: string
+  ): Promise<string> {
+    try {
+      const chat = this.ai.chats.create({
+        model: 'gemini-2.5-flash',
+        config: {
+          systemInstruction: systemInstruction,
+        },
+        history: history,
+      });
+
+      const response = await chat.sendMessage({ message: message });
+      return response.text || "I didn't catch that.";
+    } catch (error) {
+      console.error("Error in chat bot:", error);
+      return "Sorry, I'm having trouble processing your request right now.";
+    }
+  }
+
+  // 4. Live API Connection
   async connectLive(
     voiceName: VoiceOption,
     systemInstruction: string, // Full prompt passed from App state

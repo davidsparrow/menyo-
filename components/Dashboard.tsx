@@ -1,12 +1,14 @@
 import React, { useState } from 'react';
 import QRCode from 'react-qr-code';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { Phone, ExternalLink, Settings, Play, StopCircle, Mic } from 'lucide-react';
+import { Phone, ExternalLink, Settings, Play, StopCircle, Mic, MonitorPlay, MessageSquare } from 'lucide-react';
 import { RestaurantProfile } from '../types';
 import { geminiService } from '../services/geminiService';
 
 interface DashboardProps {
   profile: RestaurantProfile;
+  onDeploy: () => void;
+  onTextChat: () => void;
 }
 
 const mockData = [
@@ -19,7 +21,7 @@ const mockData = [
   { name: 'Sun', calls: 30 },
 ];
 
-export const Dashboard: React.FC<DashboardProps> = ({ profile }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ profile, onDeploy, onTextChat }) => {
   const [isLiveDemoActive, setIsLiveDemoActive] = useState(false);
   const [liveClient, setLiveClient] = useState<{ disconnect: () => void; sendAudio: (d: Float32Array) => void } | null>(null);
   const [volume, setVolume] = useState(0);
@@ -90,10 +92,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ profile }) => {
             <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
             Voice Bot Active
           </div>
-          <div className="text-right">
-            <p className="text-sm font-bold text-slate-800">{profile.phoneNumber}</p>
-            <p className="text-xs text-slate-500">Twilio Connected</p>
-          </div>
+          <button 
+             onClick={onDeploy}
+             className="bg-slate-900 text-white px-4 py-2 rounded-lg font-bold text-sm flex items-center gap-2 hover:bg-slate-800 transition"
+          >
+             <MonitorPlay className="w-4 h-4" /> Deploy Kiosk
+          </button>
         </div>
       </header>
 
@@ -151,36 +155,46 @@ export const Dashboard: React.FC<DashboardProps> = ({ profile }) => {
                 Speak directly to your configured agent using Gemini Native Audio. This simulates a customer call.
               </p>
               
-              {!isLiveDemoActive ? (
-                <button 
-                  onClick={startLiveDemo}
-                  className="w-full bg-white text-brand-600 py-3 rounded-lg font-bold hover:bg-brand-50 transition flex items-center justify-center gap-2"
-                >
-                  <Phone className="w-5 h-5" />
-                  Start Test Call
-                </button>
-              ) : (
-                <div className="text-center">
-                  <div className="mb-6 flex justify-center items-center h-24">
-                     {/* Visualizer */}
-                     <div 
-                      className="rounded-full bg-white/20 transition-all duration-75"
-                      style={{
-                        width: `${50 + volume}px`,
-                        height: `${50 + volume}px`
-                      }}
-                     />
-                  </div>
-                  <p className="mb-4 text-brand-200 animate-pulse">Listening & Speaking...</p>
+              <div className="space-y-3">
+                {!isLiveDemoActive ? (
                   <button 
-                    onClick={stopLiveDemo}
-                    className="w-full bg-red-500 text-white py-3 rounded-lg font-bold hover:bg-red-600 transition flex items-center justify-center gap-2"
+                    onClick={startLiveDemo}
+                    className="w-full bg-white text-brand-600 py-3 rounded-lg font-bold hover:bg-brand-50 transition flex items-center justify-center gap-2"
                   >
-                    <StopCircle className="w-5 h-5" />
-                    End Call
+                    <Phone className="w-5 h-5" />
+                    Start Voice Call
                   </button>
-                </div>
-              )}
+                ) : (
+                  <div className="text-center">
+                    <div className="mb-6 flex justify-center items-center h-24">
+                      {/* Visualizer */}
+                      <div 
+                        className="rounded-full bg-white/20 transition-all duration-75"
+                        style={{
+                          width: `${50 + volume}px`,
+                          height: `${50 + volume}px`
+                        }}
+                      />
+                    </div>
+                    <p className="mb-4 text-brand-200 animate-pulse">Listening & Speaking...</p>
+                    <button 
+                      onClick={stopLiveDemo}
+                      className="w-full bg-red-500 text-white py-3 rounded-lg font-bold hover:bg-red-600 transition flex items-center justify-center gap-2"
+                    >
+                      <StopCircle className="w-5 h-5" />
+                      End Call
+                    </button>
+                  </div>
+                )}
+                
+                <button 
+                   onClick={onTextChat}
+                   className="w-full bg-brand-800 text-brand-100 py-3 rounded-lg font-bold hover:bg-brand-700 transition flex items-center justify-center gap-2"
+                >
+                   <MessageSquare className="w-5 h-5" />
+                   Test Text Chat
+                </button>
+              </div>
             </div>
             
             {/* Decoration */}
@@ -193,15 +207,18 @@ export const Dashboard: React.FC<DashboardProps> = ({ profile }) => {
             <p className="text-sm text-slate-500 mb-6">
               Place this QR code on tables. It dials your AI agent immediately.
             </p>
-            <div className="p-4 bg-white border-2 border-slate-900 rounded-lg">
+            <div className="p-4 bg-white border-2 border-slate-900 rounded-lg mb-4">
                <QRCode 
                 value={`tel:${profile.phoneNumber}`} 
                 size={180}
                 viewBox={`0 0 256 256`}
                 />
             </div>
-            <p className="mt-4 text-xs text-slate-400 font-mono">{profile.phoneNumber}</p>
-            <button className="mt-4 text-brand-600 text-sm font-medium flex items-center gap-1 hover:underline">
+            {/* CHUNKY PHONE NUMBER */}
+            <p className="text-3xl font-black tracking-widest text-slate-900 mt-2 font-mono">
+               {profile.phoneNumber || '---'}
+            </p>
+            <button className="mt-6 text-brand-600 text-sm font-medium flex items-center gap-1 hover:underline">
               <ExternalLink className="w-3 h-3" /> Download High-Res
             </button>
           </div>

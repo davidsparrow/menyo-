@@ -1,3 +1,4 @@
+
 export interface MenuItem {
   category: string;
   name: string;
@@ -45,6 +46,26 @@ export interface ConnectedApp {
   };
 }
 
+export interface Table {
+  id: string;
+  autoNumber: number;
+  name: string;
+  maxGuests: number;
+}
+
+export interface Reservation {
+  id: string;
+  customerName: string;
+  time: string; // ISO string or simple time string for mock
+  date: string; // YYYY-MM-DD
+  partySize: number;
+  status: 'CONFIRMED' | 'PENDING' | 'CANCELLED';
+  phone: string;
+  notes?: string;
+  tableIds?: string[];
+  hasConflict?: boolean;
+}
+
 export interface RestaurantProfile {
   id: string;
   info: BusinessInfo;
@@ -60,6 +81,14 @@ export interface RestaurantProfile {
   humanSupportPhone?: string;
   policies: Policies;
   editableSystemPrompt: string; // The final source of truth for the bot
+  
+  // Reservation Settings
+  maxGroupSize: number;
+  maxGuestsPerHour: number;
+  tables: Table[];
+
+  // Security
+  adminPassword?: string;
 
   // Connected Apps
   connectedApps: ConnectedApp[];
