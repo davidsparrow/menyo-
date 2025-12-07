@@ -57,6 +57,7 @@ function App() {
   const [isKioskProcessing, setIsKioskProcessing] = useState(false);
   const kioskChatEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null); // For Kiosk Mic Toggle
+  const ttsSourceRef = useRef<AudioBufferSourceNode | null>(null); // Track active TTS source
 
   // Test Bot Text Chat State
   const [showTextChat, setShowTextChat] = useState(false);
@@ -494,6 +495,33 @@ ${orderInstructions}
     }
   };
   
+  // Kiosk Session Helper
+  const resetKioskSession = () => {
+     // 1. Stop Microphone
+     if (recognitionRef.current) {
+        try { recognitionRef.current.stop(); } catch(e) { console.error(e); }
+        recognitionRef.current = null;
+     }
+     setIsKioskListening(false);
+
+     // 2. Stop Audio Output (Gemini Node + Browser TTS)
+     if (ttsSourceRef.current) {
+        try { ttsSourceRef.current.stop(); } catch(e) {}
+        ttsSourceRef.current = null;
+     }
+     window.speechSynthesis.cancel();
+
+     // 3. Reset Toggle to OFF
+     setKioskVoiceEnabled(false);
+
+     // 4. Clear Interaction Data
+     setKioskInput('');
+     setKioskChatHistory([]);
+
+     // 5. Navigate Home
+     setKioskView('HOME');
+  };
+  
   // Kiosk Chat Handlers
   const toggleKioskMic = () => {
     if (isKioskListening) {
@@ -563,6 +591,11 @@ ${orderInstructions}
     // Stop any existing browser TTS
     window.speechSynthesis.cancel();
     
+    // Stop any existing Gemini TTS
+    if (ttsSourceRef.current) {
+       try { ttsSourceRef.current.stop(); } catch(e) {}
+    }
+    
     try {
       // Attempt to use the Gemini Native Voice via TTS API
       const audioBuffer = await geminiService.generateTTS(text, profile.voiceId);
@@ -571,6 +604,10 @@ ${orderInstructions}
       const source = audioContext.createBufferSource();
       source.buffer = audioBuffer;
       source.connect(audioContext.destination);
+      
+      ttsSourceRef.current = source;
+      source.onended = () => { ttsSourceRef.current = null; };
+      
       source.start(0);
 
     } catch (err) {
@@ -2166,8 +2203,8 @@ ${orderInstructions}
                            </div>
                         </div>
                         <div className="p-6 border-t border-slate-100 flex gap-4 bg-slate-50">
-                           <button onClick={() => setKioskView('HOME')} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
-                           <button className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 shadow-lg shadow-green-500/30">Checkout</button>
+                           <button onClick={resetKioskSession} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
+                           <button onClick={() => { alert('Order Placed! Simulating receipt...'); resetKioskSession(); }} className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 shadow-lg shadow-green-500/30">Checkout</button>
                         </div>
                       </>
                    ) : (
@@ -2195,8 +2232,8 @@ ${orderInstructions}
                            </div>
                         </div>
                         <div className="p-6 border-t border-slate-100 flex gap-4 bg-slate-50">
-                           <button onClick={() => setKioskView('HOME')} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
-                           <button className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 shadow-lg shadow-slate-900/30">Confirm</button>
+                           <button onClick={resetKioskSession} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
+                           <button onClick={() => { alert('Reservation Confirmed! Sending confirmation...'); resetKioskSession(); }} className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 shadow-lg shadow-slate-900/30">Confirm</button>
                         </div>
                       </>
                    )}
