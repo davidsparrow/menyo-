@@ -107,7 +107,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ profile, onDeploy, onTextC
           {/* Analytics */}
           <div className="bg-white p-6 rounded-xl shadow-sm border border-slate-100">
             <h3 className="text-lg font-bold mb-4">Call Volume (Last 7 Days)</h3>
-            <div className="h-64">
+            <div className="h-64 w-full" style={{ minWidth: 0 }}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={mockData}>
                    <CartesianGrid strokeDasharray="3 3" vertical={false} />

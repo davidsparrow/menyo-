@@ -504,9 +504,7 @@ ${orderInstructions}
 
 
   // --- Render Steps (Wizard) ---
-  // ... (Step 1-6 Functions Omitted for brevity but assumed present in final XML if I were outputting full file. 
-  // IMPORTANT: Since I am outputting the WHOLE FILE, I must include everything.
-
+ 
   const renderStep1_Menu = () => (
     <div className="space-y-8">
       <div>
@@ -612,15 +610,15 @@ ${orderInstructions}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
              <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Restaurant Name</label>
-                <input value={profile.info.name} onChange={handleInfoChange} name="name" className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-green-500 outline-none transition" />
+                <input value={profile.info.name} onChange={handleInfoChange} name="name" className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-green-500 outline-none transition" />
              </div>
              <div className="space-y-2">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Address</label>
-                <input value={profile.info.address} onChange={handleInfoChange} name="address" className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-green-500 outline-none transition" />
+                <input value={profile.info.address} onChange={handleInfoChange} name="address" className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-green-500 outline-none transition" />
              </div>
              <div className="space-y-2 md:col-span-2">
                 <label className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Hours</label>
-                <input value={profile.info.hours} onChange={handleInfoChange} name="hours" className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-800 focus:ring-2 focus:ring-green-500 outline-none transition" />
+                <input value={profile.info.hours} onChange={handleInfoChange} name="hours" className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-green-500 outline-none transition" />
              </div>
           </div>
         </div>
@@ -675,7 +673,7 @@ ${orderInstructions}
                     placeholder="Enter Restaurant API Token" 
                     value={gloriaInput}
                     onChange={(e) => setGloriaInput(e.target.value)}
-                    className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-lg text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500 transition"
+                    className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-lg text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500 transition"
                   />
                 </div>
                 <button 
@@ -735,7 +733,7 @@ ${orderInstructions}
                      <UtensilsCrossed className="w-3.5 h-3.5" /> Dietary Restrictions
                    </label>
                    <textarea 
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-brand-500 outline-none"
                       rows={2}
                       value={profile.policies.dietaryRestrictions}
                       onChange={(e) => handlePolicyChange('dietaryRestrictions', e.target.value)}
@@ -746,7 +744,7 @@ ${orderInstructions}
                      <Baby className="w-3.5 h-3.5" /> Kids & Family
                    </label>
                    <textarea 
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-brand-500 outline-none"
                       rows={2}
                       value={profile.policies.kidsZone}
                       onChange={(e) => handlePolicyChange('kidsZone', e.target.value)}
@@ -757,7 +755,7 @@ ${orderInstructions}
                      <Accessibility className="w-3.5 h-3.5" /> Accessibility
                    </label>
                    <textarea 
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-brand-500 outline-none"
                       rows={2}
                       value={profile.policies.accessibility}
                       onChange={(e) => handlePolicyChange('accessibility', e.target.value)}
@@ -777,7 +775,7 @@ ${orderInstructions}
                    <select 
                     value={profile.bookingPreference}
                     onChange={(e) => setProfile(p => ({...p, bookingPreference: e.target.value as any}))}
-                    className="w-full p-3 border border-slate-200 rounded-lg bg-white font-medium"
+                    className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-900 font-medium"
                    >
                      <option value="GLORIA_FOODS" disabled={!profile.integrations.gloriaFoods}>Use Gloria Foods API {profile.integrations.gloriaFoods ? '(Connected)' : '(Not Connected)'}</option>
                      <option value="HUMAN_SUPPORT">Route to Human Phone</option>
@@ -792,7 +790,7 @@ ${orderInstructions}
                       type="text" 
                       value={profile.humanSupportPhone || ''}
                       onChange={(e) => setProfile(p => ({...p, humanSupportPhone: e.target.value}))}
-                      className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50"
+                      className="w-full p-3 border border-slate-200 rounded-lg bg-slate-50 text-slate-900"
                       placeholder="+1 (555) ..."
                     />
                   </div>
@@ -801,7 +799,7 @@ ${orderInstructions}
                  <div>
                    <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Large Party Policy</label>
                    <input 
-                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 outline-none"
+                      className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900 focus:ring-2 focus:ring-brand-500 outline-none"
                       value={profile.policies.largeParties}
                       onChange={(e) => handlePolicyChange('largeParties', e.target.value)}
                    />
@@ -1012,7 +1010,7 @@ ${orderInstructions}
                                 type="text" 
                                 value={displayConfig.name}
                                 onChange={(e) => setTempAppConfig(prev => prev ? {...prev, name: e.target.value} : null)}
-                                className="font-bold text-2xl text-slate-900 border-b border-slate-300 focus:border-brand-500 focus:outline-none bg-transparent"
+                                className="font-bold text-2xl text-slate-900 border-b border-slate-300 focus:border-brand-500 focus:outline-none bg-white"
                               />
                            ) : (
                               <h2 className="font-bold text-2xl text-slate-900 flex items-center gap-2">
@@ -1045,7 +1043,6 @@ ${orderInstructions}
 
                   {/* Settings Form */}
                   <div className="space-y-6">
-                     {/* Form Logic Same as previous response, omitted for brevity but included in output */}
                      {/* Webhooks Section */}
                      <div className="bg-slate-50 rounded-xl p-6 border border-slate-200">
                         <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
@@ -1061,7 +1058,7 @@ ${orderInstructions}
                                      type="text" 
                                      value={displayConfig.config.apiKey || ''}
                                      onChange={(e) => setTempAppConfig(prev => prev ? {...prev, config: {...prev.config, apiKey: e.target.value}} : null)}
-                                     className="w-full p-3 border border-slate-200 rounded-lg"
+                                     className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-900"
                                    />
                                 ) : (
                                    <div className="font-mono text-sm bg-white border border-slate-200 rounded p-2 text-slate-600 truncate">
@@ -1080,7 +1077,7 @@ ${orderInstructions}
                                      type="text" 
                                      value={displayConfig.config.webhookIncoming || ''}
                                      onChange={(e) => setTempAppConfig(prev => prev ? {...prev, config: {...prev.config, webhookIncoming: e.target.value}} : null)}
-                                     className="w-full p-3 border border-slate-200 rounded-lg font-mono text-sm"
+                                     className="w-full p-3 border border-slate-200 rounded-lg font-mono text-sm bg-white text-slate-900"
                                    />
                                 ) : (
                                    <div className="flex items-center gap-2 text-sm text-slate-600 bg-white p-2 rounded border border-slate-200">
@@ -1099,7 +1096,7 @@ ${orderInstructions}
                                    type="text" 
                                    value={displayConfig.config.webhookOutgoing || ''}
                                    onChange={(e) => setTempAppConfig(prev => prev ? {...prev, config: {...prev.config, webhookOutgoing: e.target.value}} : null)}
-                                   className="w-full p-3 border border-slate-200 rounded-lg font-mono text-sm"
+                                   className="w-full p-3 border border-slate-200 rounded-lg font-mono text-sm bg-white text-slate-900"
                                  />
                               ) : (
                                  <div className="flex items-center gap-2 text-sm text-slate-600 bg-white p-2 rounded border border-slate-200">
@@ -1120,7 +1117,7 @@ ${orderInstructions}
                                 type="text" 
                                 value={displayConfig.config.accountName || ''}
                                 onChange={(e) => setTempAppConfig(prev => prev ? {...prev, config: {...prev.config, accountName: e.target.value}} : null)}
-                                className="w-full p-3 border border-slate-200 rounded-lg"
+                                className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-900"
                               />
                            ) : (
                               <div className="p-3 bg-slate-50 rounded-lg text-slate-700 font-medium">
@@ -1135,7 +1132,7 @@ ${orderInstructions}
                                 type="password" 
                                 value={displayConfig.config.accountPassword || ''}
                                 onChange={(e) => setTempAppConfig(prev => prev ? {...prev, config: {...prev.config, accountPassword: e.target.value}} : null)}
-                                className="w-full p-3 border border-slate-200 rounded-lg"
+                                className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-900"
                                 placeholder="••••••"
                               />
                            ) : (
@@ -1159,7 +1156,7 @@ ${orderInstructions}
                                    type="text" 
                                    value={displayConfig.config.supportPhone || ''}
                                    onChange={(e) => setTempAppConfig(prev => prev ? {...prev, config: {...prev.config, supportPhone: e.target.value}} : null)}
-                                   className="w-full p-3 border border-brand-200 rounded-lg"
+                                   className="w-full p-3 border border-brand-200 rounded-lg bg-white text-slate-900"
                                    placeholder="+1 ..."
                                  />
                               ) : displayConfig.config.supportPhone ? (
@@ -1180,7 +1177,7 @@ ${orderInstructions}
                                    type="text" 
                                    value={displayConfig.config.supportEmail || ''}
                                    onChange={(e) => setTempAppConfig(prev => prev ? {...prev, config: {...prev.config, supportEmail: e.target.value}} : null)}
-                                   className="w-full p-3 border border-brand-200 rounded-lg"
+                                   className="w-full p-3 border border-brand-200 rounded-lg bg-white text-slate-900"
                                    placeholder="help@..."
                                  />
                               ) : displayConfig.config.supportEmail ? (
@@ -1270,7 +1267,7 @@ ${orderInstructions}
                   <div className="flex items-center gap-2">
                      <span className="text-xs font-bold text-slate-400 uppercase">Filter Guests:</span>
                      <select 
-                        className="bg-slate-50 border border-slate-200 rounded-lg text-sm p-2 font-medium"
+                        className="bg-slate-50 border border-slate-200 rounded-lg text-sm p-2 font-medium text-slate-900"
                         value={resFilterGroupSize}
                         onChange={(e) => setResFilterGroupSize(e.target.value === 'ALL' ? 'ALL' : parseInt(e.target.value))}
                      >
@@ -1392,7 +1389,7 @@ ${orderInstructions}
                              type="number" 
                              value={profile.maxGroupSize}
                              onChange={(e) => setProfile(p => ({...p, maxGroupSize: parseInt(e.target.value)}))}
-                             className="w-full p-3 border border-slate-200 rounded-lg font-mono text-lg"
+                             className="w-full p-3 border border-slate-200 rounded-lg font-mono text-lg bg-white text-slate-900"
                           />
                        </div>
                        <div>
@@ -1402,7 +1399,7 @@ ${orderInstructions}
                              type="number" 
                              value={profile.maxGuestsPerHour}
                              onChange={(e) => setProfile(p => ({...p, maxGuestsPerHour: parseInt(e.target.value)}))}
-                             className="w-full p-3 border border-slate-200 rounded-lg font-mono text-lg"
+                             className="w-full p-3 border border-slate-200 rounded-lg font-mono text-lg bg-white text-slate-900"
                           />
                        </div>
                     </div>
@@ -1442,7 +1439,7 @@ ${orderInstructions}
                                          onChange={(e) => setProfile(p => ({
                                             ...p, tables: p.tables.map(t => t.id === table.id ? {...t, name: e.target.value} : t)
                                          }))}
-                                         className="w-full bg-transparent border-b border-transparent hover:border-slate-300 focus:border-brand-500 outline-none font-medium text-slate-900"
+                                         className="w-full bg-white border-b border-transparent hover:border-slate-300 focus:border-brand-500 outline-none font-medium text-slate-900 px-2 py-1 rounded"
                                       />
                                    </td>
                                    <td className="p-4">
@@ -1454,7 +1451,7 @@ ${orderInstructions}
                                             onChange={(e) => setProfile(p => ({
                                                ...p, tables: p.tables.map(t => t.id === table.id ? {...t, maxGuests: parseInt(e.target.value)} : t)
                                             }))}
-                                            className="w-16 bg-slate-100 rounded px-2 py-1 text-center font-medium outline-none focus:ring-2 focus:ring-brand-500"
+                                            className="w-16 bg-white border border-slate-200 rounded px-2 py-1 text-center font-medium outline-none focus:ring-2 focus:ring-brand-500 text-slate-900"
                                          />
                                       </div>
                                    </td>
@@ -1489,7 +1486,7 @@ ${orderInstructions}
             <div className="absolute inset-0 bg-black/20 backdrop-blur-sm flex items-center justify-center z-50 p-4">
                <div className="bg-white rounded-2xl w-full max-w-lg shadow-2xl p-6 animate-in zoom-in-95 flex flex-col max-h-[90vh]">
                   <div className="flex justify-between items-center mb-6">
-                     <h3 className="text-lg font-bold">Edit Reservation</h3>
+                     <h3 className="text-lg font-bold text-slate-900">Edit Reservation</h3>
                      <button onClick={() => setIsEditingReservation(false)}><X className="w-5 h-5 text-slate-400" /></button>
                   </div>
                   <div className="space-y-4 overflow-y-auto flex-1 pr-2">
@@ -1512,7 +1509,7 @@ ${orderInstructions}
                               type="date" 
                               value={selectedReservation.date}
                               onChange={(e) => setSelectedReservation({...selectedReservation, date: e.target.value})}
-                              className="w-full p-2 border border-slate-200 rounded mt-1"
+                              className="w-full p-2 border border-slate-200 rounded mt-1 bg-white text-slate-900"
                            />
                         </div>
                         <div>
@@ -1521,7 +1518,7 @@ ${orderInstructions}
                               type="time" 
                               value={selectedReservation.time}
                               onChange={(e) => setSelectedReservation({...selectedReservation, time: e.target.value})}
-                              className="w-full p-2 border border-slate-200 rounded mt-1"
+                              className="w-full p-2 border border-slate-200 rounded mt-1 bg-white text-slate-900"
                            />
                         </div>
                      </div>
@@ -1530,7 +1527,7 @@ ${orderInstructions}
                         <input 
                            value={selectedReservation.customerName}
                            onChange={(e) => setSelectedReservation({...selectedReservation, customerName: e.target.value})}
-                           className="w-full p-2 border border-slate-200 rounded mt-1"
+                           className="w-full p-2 border border-slate-200 rounded mt-1 bg-white text-slate-900"
                         />
                      </div>
                      <div className="grid grid-cols-2 gap-4">
@@ -1540,7 +1537,7 @@ ${orderInstructions}
                               type="number"
                               value={selectedReservation.partySize}
                               onChange={(e) => setSelectedReservation({...selectedReservation, partySize: parseInt(e.target.value)})}
-                              className="w-full p-2 border border-slate-200 rounded mt-1"
+                              className="w-full p-2 border border-slate-200 rounded mt-1 bg-white text-slate-900"
                            />
                         </div>
                         <div>
@@ -1548,7 +1545,7 @@ ${orderInstructions}
                            <select 
                               value={selectedReservation.status}
                               onChange={(e) => setSelectedReservation({...selectedReservation, status: e.target.value as any})}
-                              className="w-full p-2 border border-slate-200 rounded mt-1"
+                              className="w-full p-2 border border-slate-200 rounded mt-1 bg-white text-slate-900"
                            >
                               <option value="CONFIRMED">Confirmed</option>
                               <option value="PENDING">Pending</option>
@@ -1582,7 +1579,7 @@ ${orderInstructions}
                         <textarea 
                            value={selectedReservation.notes || ''}
                            onChange={(e) => setSelectedReservation({...selectedReservation, notes: e.target.value})}
-                           className="w-full p-2 border border-slate-200 rounded mt-1 h-20"
+                           className="w-full p-2 border border-slate-200 rounded mt-1 h-20 bg-white text-slate-900"
                         />
                      </div>
                   </div>
@@ -1612,7 +1609,6 @@ ${orderInstructions}
       </div>
     );
   };
-// ... (Render Settings, Deployed, and Main Render remain the same as previous logical block)
 
   const renderSettings = () => (
     <div className="max-w-7xl mx-auto py-8 px-6 h-full flex flex-col">
@@ -1679,7 +1675,7 @@ ${orderInstructions}
                       <div>
                         <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Dietary Restrictions</label>
                         <textarea 
-                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900"
                             rows={3}
                             value={profile.policies.dietaryRestrictions}
                             onChange={(e) => handlePolicyChange('dietaryRestrictions', e.target.value)}
@@ -1688,7 +1684,7 @@ ${orderInstructions}
                       <div>
                         <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Kids Policy</label>
                         <textarea 
-                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900"
                             rows={3}
                             value={profile.policies.kidsZone}
                             onChange={(e) => handlePolicyChange('kidsZone', e.target.value)}
@@ -1697,7 +1693,7 @@ ${orderInstructions}
                       <div>
                         <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Accessibility</label>
                         <textarea 
-                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm"
+                            className="w-full p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-900"
                             rows={3}
                             value={profile.policies.accessibility}
                             onChange={(e) => handlePolicyChange('accessibility', e.target.value)}
@@ -1708,7 +1704,7 @@ ${orderInstructions}
                          <select 
                           value={profile.bookingPreference}
                           onChange={(e) => setProfile(p => ({...p, bookingPreference: e.target.value as any}))}
-                          className="w-full p-3 border border-slate-200 rounded-lg bg-white font-medium mb-2"
+                          className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-900 font-medium mb-2"
                          >
                            <option value="GLORIA_FOODS">Use Gloria Foods API</option>
                            <option value="HUMAN_SUPPORT">Route to Human Phone</option>
@@ -1753,7 +1749,7 @@ ${orderInstructions}
                            <input 
                               type="text" 
                               placeholder="Type a change (e.g., 'We are closed Mondays')" 
-                              className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                              className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
                               value={chatMessage}
                               onChange={(e) => setChatMessage(e.target.value)}
                            />
@@ -1833,7 +1829,7 @@ ${orderInstructions}
                            type="text" 
                            value={profile.adminPassword || ''}
                            onChange={(e) => setProfile(p => ({...p, adminPassword: e.target.value}))}
-                           className="w-full p-3 border border-slate-200 rounded-lg bg-white"
+                           className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-900"
                         />
                      </div>
                   </div>
@@ -1920,7 +1916,7 @@ ${orderInstructions}
                       </div>
                    </div>
                    <div className="p-4 border-t border-slate-200 bg-white relative">
-                      <input placeholder="Type your order..." className="w-full p-3 bg-slate-100 rounded-xl outline-none" disabled />
+                      <input placeholder="Type your order..." className="w-full p-3 bg-slate-100 rounded-xl outline-none text-slate-900" disabled />
                       <button className="absolute right-6 top-1/2 -translate-y-1/2 bg-brand-600 p-2 rounded-lg text-white"><Send className="w-4 h-4" /></button>
                    </div>
                 </div>
@@ -1978,7 +1974,7 @@ ${orderInstructions}
                       </div>
                    </div>
                    <div className="p-4 border-t border-slate-200 bg-white relative">
-                      <input placeholder="Type your request..." className="w-full p-3 bg-slate-100 rounded-xl outline-none" disabled />
+                      <input placeholder="Type your request..." className="w-full p-3 bg-slate-100 rounded-xl outline-none text-slate-900" disabled />
                       <button className="absolute right-6 top-1/2 -translate-y-1/2 bg-brand-600 p-2 rounded-lg text-white"><Send className="w-4 h-4" /></button>
                    </div>
                 </div>
@@ -2120,7 +2116,7 @@ ${orderInstructions}
               <form onSubmit={handleBotChatSubmit} className="p-4 border-t border-slate-100 bg-white rounded-b-2xl">
                  <div className="relative">
                     <input 
-                       className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-brand-500"
+                       className="w-full pl-4 pr-12 py-3 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-brand-500"
                        placeholder="Say something..."
                        value={botChatMessage}
                        onChange={(e) => setBotChatMessage(e.target.value)}
