@@ -1,6 +1,6 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { Upload, Check, Store, Link2, Phone, Mic, ArrowRight, Loader2, KeyRound, BookOpen, Edit3, Settings, Users, Accessibility, Baby, UtensilsCrossed, MessageSquare, Send, X, Bot, Save, Plug, Globe, Server, Plus, Trash2, ExternalLink, Mail, Lock, MonitorPlay, ShieldCheck, Home, ShoppingBag, Calendar, ChevronLeft, ChevronRight, Bell, Smartphone, RefreshCw, LayoutGrid, List, AlertTriangle } from 'lucide-react';
+import { Upload, Check, Store, Link2, Phone, Mic, ArrowRight, Loader2, KeyRound, BookOpen, Edit3, Settings, Users, Accessibility, Baby, UtensilsCrossed, MessageSquare, Send, X, Bot, Save, Plug, Globe, Server, Plus, Trash2, ExternalLink, Mail, Lock, MonitorPlay, ShieldCheck, Home, ShoppingBag, Calendar, ChevronLeft, ChevronRight, Bell, Smartphone, RefreshCw, LayoutGrid, List, AlertTriangle, Volume2, VolumeX } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
 import { geminiService } from './services/geminiService';
 import { RestaurantProfile, VoiceOption, ConnectedApp, Reservation, Table } from './types';
@@ -46,7 +46,15 @@ function App() {
   const [unlockError, setUnlockError] = useState(false);
   const [kioskView, setKioskView] = useState<'HOME' | 'ORDER' | 'RESERVE'>('HOME');
 
-  // Text Chat Bot State
+  // Kiosk Chat State
+  const [kioskChatHistory, setKioskChatHistory] = useState<{role: 'user' | 'model', text: string}[]>([]);
+  const [kioskInput, setKioskInput] = useState('');
+  const [kioskVoiceEnabled, setKioskVoiceEnabled] = useState(false);
+  const [isKioskListening, setIsKioskListening] = useState(false);
+  const [isKioskProcessing, setIsKioskProcessing] = useState(false);
+  const kioskChatEndRef = useRef<HTMLDivElement>(null);
+
+  // Test Bot Text Chat State
   const [showTextChat, setShowTextChat] = useState(false);
   const [botChatHistory, setBotChatHistory] = useState<{role: 'user' | 'model', text: string}[]>([]);
   const [botChatMessage, setBotChatMessage] = useState('');
@@ -453,10 +461,98 @@ ${orderInstructions}
       setUnlockPassword('');
       setUnlockError(false);
       setKioskView('HOME'); // Reset kiosk view
+      setKioskChatHistory([]); // Clear chat
     } else {
       setUnlockError(true);
     }
   };
+  
+  // Kiosk Chat Handlers
+  const handleKioskMic = () => {
+    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+      const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = 'en-US';
+
+      setIsKioskListening(true);
+
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        setKioskInput(transcript);
+        setIsKioskListening(false);
+      };
+
+      recognition.onerror = () => setIsKioskListening(false);
+      recognition.onend = () => setIsKioskListening(false);
+
+      recognition.start();
+    } else {
+      alert("Voice input is not supported in this browser.");
+    }
+  };
+
+  const speakText = (text: string) => {
+    if (!kioskVoiceEnabled) return;
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    // utterance.voice = window.speechSynthesis.getVoices()[0]; // Use default
+    window.speechSynthesis.speak(utterance);
+  };
+
+  const handleKioskSubmit = async (e?: React.FormEvent) => {
+    e?.preventDefault();
+    if (!kioskInput.trim() || isKioskProcessing) return;
+
+    const userText = kioskInput;
+    setKioskInput('');
+    setKioskChatHistory(prev => [...prev, { role: 'user', text: userText }]);
+    setIsKioskProcessing(true);
+
+    try {
+      const apiHistory = kioskChatHistory.map(msg => ({
+         role: msg.role,
+         parts: [{ text: msg.text }]
+      }));
+      
+      // Inject slight context based on view
+      const contextPrefix = kioskView === 'ORDER' 
+         ? "Context: The user is using the kiosk to PLACE AN ORDER. " 
+         : "Context: The user is using the kiosk to MAKE A RESERVATION. ";
+
+      const responseText = await geminiService.sendChatMessage(
+         apiHistory, 
+         profile.editableSystemPrompt,
+         contextPrefix + userText
+      );
+
+      setKioskChatHistory(prev => [...prev, { role: 'model', text: responseText }]);
+      speakText(responseText);
+
+    } catch (err) {
+       console.error(err);
+       setKioskChatHistory(prev => [...prev, { role: 'model', text: "I'm having trouble connecting. Please try again." }]);
+    } finally {
+      setIsKioskProcessing(false);
+    }
+  };
+  
+  useEffect(() => {
+    kioskChatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [kioskChatHistory]);
+  
+  // Clear chat when switching kiosk views
+  useEffect(() => {
+    if (view === 'DEPLOYED') {
+       if (kioskView === 'ORDER') {
+          setKioskChatHistory([{ role: 'model', text: "Hi! What can I get started for you today? Check out our specials on the right." }]);
+       } else if (kioskView === 'RESERVE') {
+          setKioskChatHistory([{ role: 'model', text: "Welcome! When would you like to join us for dinner?" }]);
+       }
+    }
+  }, [kioskView, view]);
+
 
   // --- Reservation Handlers ---
   const handleReservationClick = (res: Reservation) => {
@@ -1890,122 +1986,126 @@ ${orderInstructions}
              </div>
           )}
 
-          {kioskView === 'ORDER' && (
+          {(kioskView === 'ORDER' || kioskView === 'RESERVE') && (
              <div className="flex w-full h-[600px] bg-white rounded-3xl overflow-hidden shadow-2xl text-slate-900 animate-in fade-in slide-in-from-right-8">
                 {/* Left: Chat */}
                 <div className="w-1/2 border-r border-slate-200 flex flex-col bg-slate-50">
-                   <div className="p-4 border-b border-slate-200 bg-white">
-                      <h3 className="font-bold text-lg flex items-center gap-2"><ShoppingBag className="w-5 h-5 text-orange-500" /> Order Assistant</h3>
+                   <div className="p-4 border-b border-slate-200 bg-white flex justify-between items-center">
+                      <h3 className="font-bold text-lg flex items-center gap-2">
+                        {kioskView === 'ORDER' ? <ShoppingBag className="w-5 h-5 text-orange-500" /> : <Calendar className="w-5 h-5 text-purple-500" />}
+                        {kioskView === 'ORDER' ? 'Order Assistant' : 'Reservations'}
+                      </h3>
+                      <button 
+                         onClick={() => setKioskVoiceEnabled(!kioskVoiceEnabled)}
+                         className={`p-2 rounded-full transition-colors ${kioskVoiceEnabled ? 'bg-brand-100 text-brand-600' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
+                         title={kioskVoiceEnabled ? "Mute Bot Voice" : "Enable Bot Voice"}
+                      >
+                         {kioskVoiceEnabled ? <Volume2 className="w-5 h-5" /> : <VolumeX className="w-5 h-5" />}
+                      </button>
                    </div>
-                   <div className="flex-1 p-4 space-y-4">
-                      {/* Simulated Chat */}
-                      <div className="flex justify-start">
-                         <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm text-sm">
-                            Hi! What can I get started for you today? Check out our specials on the right.
-                         </div>
-                      </div>
-                      <div className="flex justify-end">
-                         <div className="bg-brand-600 text-white p-3 rounded-2xl rounded-tr-none shadow-sm text-sm">
-                            I'll have the Spicy Rigatoni, please.
-                         </div>
-                      </div>
-                      <div className="flex justify-start">
-                         <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm text-sm">
-                            Great choice! Would you like to add a Garlic Bread with that?
-                         </div>
-                      </div>
-                   </div>
-                   <div className="p-4 border-t border-slate-200 bg-white relative">
-                      <input placeholder="Type your order..." className="w-full p-3 bg-slate-100 rounded-xl outline-none text-slate-900" disabled />
-                      <button className="absolute right-6 top-1/2 -translate-y-1/2 bg-brand-600 p-2 rounded-lg text-white"><Send className="w-4 h-4" /></button>
-                   </div>
-                </div>
-                {/* Right: Order Summary */}
-                <div className="w-1/2 flex flex-col">
-                   <div className="flex-1 p-8">
-                      <h3 className="text-2xl font-bold mb-6">Your Order</h3>
-                      <div className="space-y-4">
-                         <div className="flex justify-between items-center p-4 bg-slate-50 rounded-xl border border-slate-100">
-                            <div>
-                               <p className="font-bold">Spicy Rigatoni</p>
-                               <p className="text-sm text-slate-500">Extra Spicy</p>
+                   <div className="flex-1 p-4 space-y-4 overflow-y-auto bg-slate-50">
+                      {kioskChatHistory.map((msg, i) => (
+                         <div key={i} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                            <div className={`max-w-[85%] p-3 rounded-2xl text-sm ${msg.role === 'user' ? 'bg-brand-600 text-white rounded-tr-none' : 'bg-white border border-slate-200 text-slate-800 rounded-tl-none shadow-sm'}`}>
+                               {msg.text}
                             </div>
-                            <p className="font-bold">$24.00</p>
                          </div>
-                      </div>
-                      <div className="mt-8 pt-6 border-t border-slate-100">
-                         <div className="flex justify-between text-lg font-bold">
-                            <span>Total</span>
-                            <span>$24.00</span>
+                      ))}
+                      {isKioskProcessing && (
+                         <div className="flex justify-start">
+                            <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm flex gap-1 items-center">
+                               <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></span>
+                               <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-100"></span>
+                               <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce delay-200"></span>
+                            </div>
                          </div>
+                      )}
+                      <div ref={kioskChatEndRef} />
+                   </div>
+                   
+                   <form onSubmit={handleKioskSubmit} className="p-4 border-t border-slate-200 bg-white relative flex gap-2 items-center">
+                      <button 
+                         type="button" 
+                         onClick={handleKioskMic}
+                         className={`p-3 rounded-full transition-all ${isKioskListening ? 'bg-red-500 text-white ring-4 ring-red-200 animate-pulse' : 'bg-slate-100 text-slate-500 hover:bg-slate-200'}`}
+                      >
+                         <Mic className="w-5 h-5" />
+                      </button>
+                      <div className="relative flex-1">
+                         <input 
+                            placeholder={isKioskListening ? "Listening..." : "Type or speak..."}
+                            className="w-full p-3 pr-10 bg-slate-100 rounded-xl outline-none text-slate-900 focus:ring-2 focus:ring-brand-500 transition-all" 
+                            value={kioskInput}
+                            onChange={(e) => setKioskInput(e.target.value)}
+                         />
+                         <button 
+                           type="submit" 
+                           disabled={!kioskInput.trim() || isKioskProcessing}
+                           className="absolute right-2 top-1/2 -translate-y-1/2 bg-brand-600 p-1.5 rounded-lg text-white hover:bg-brand-700 disabled:opacity-50 transition"
+                        >
+                            <Send className="w-4 h-4" />
+                         </button>
                       </div>
-                   </div>
-                   <div className="p-6 border-t border-slate-100 flex gap-4 bg-slate-50">
-                      <button onClick={() => setKioskView('HOME')} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
-                      <button className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 shadow-lg shadow-green-500/30">Checkout</button>
-                   </div>
+                   </form>
                 </div>
-             </div>
-          )}
-
-          {kioskView === 'RESERVE' && (
-             <div className="flex w-full h-[600px] bg-white rounded-3xl overflow-hidden shadow-2xl text-slate-900 animate-in fade-in slide-in-from-right-8">
-                {/* Left: Chat */}
-                <div className="w-1/2 border-r border-slate-200 flex flex-col bg-slate-50">
-                   <div className="p-4 border-b border-slate-200 bg-white">
-                      <h3 className="font-bold text-lg flex items-center gap-2"><Calendar className="w-5 h-5 text-purple-500" /> Reservations</h3>
-                   </div>
-                   <div className="flex-1 p-4 space-y-4">
-                      {/* Simulated Chat */}
-                      <div className="flex justify-start">
-                         <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm text-sm">
-                            Welcome! When would you like to join us for dinner?
-                         </div>
-                      </div>
-                      <div className="flex justify-end">
-                         <div className="bg-brand-600 text-white p-3 rounded-2xl rounded-tr-none shadow-sm text-sm">
-                            Tomorrow around 7pm for 4 people.
-                         </div>
-                      </div>
-                      <div className="flex justify-start">
-                         <div className="bg-white border border-slate-200 p-3 rounded-2xl rounded-tl-none shadow-sm text-sm">
-                            I have a table available at 7:15 PM tomorrow. Does that work?
-                         </div>
-                      </div>
-                   </div>
-                   <div className="p-4 border-t border-slate-200 bg-white relative">
-                      <input placeholder="Type your request..." className="w-full p-3 bg-slate-100 rounded-xl outline-none text-slate-900" disabled />
-                      <button className="absolute right-6 top-1/2 -translate-y-1/2 bg-brand-600 p-2 rounded-lg text-white"><Send className="w-4 h-4" /></button>
-                   </div>
-                </div>
-                {/* Right: Calendar Mock */}
+                
+                {/* Right Panel (Mock Content) */}
                 <div className="w-1/2 flex flex-col">
-                   <div className="flex-1 p-8">
-                      <h3 className="text-2xl font-bold mb-6">Select Date & Time</h3>
-                      <div className="bg-slate-50 rounded-xl p-4 mb-6 border border-slate-100">
-                         {/* Fake Calendar Grid */}
-                         <div className="grid grid-cols-7 gap-2 text-center text-sm mb-2 font-bold text-slate-400">
-                            <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
-                         </div>
-                         <div className="grid grid-cols-7 gap-2 text-center text-sm font-medium">
-                            <span className="text-slate-300">29</span><span className="text-slate-300">30</span>
-                            <span className="p-2">1</span><span className="p-2">2</span><span className="p-2 bg-brand-600 text-white rounded-full">3</span><span className="p-2">4</span><span className="p-2">5</span>
-                         </div>
-                      </div>
-                      <div className="space-y-3">
-                         <p className="font-bold text-sm text-slate-500 uppercase">Available Times</p>
-                         <div className="flex gap-2 flex-wrap">
-                            <button className="px-4 py-2 border border-slate-200 rounded-lg hover:border-brand-500 hover:text-brand-600 text-sm">6:00 PM</button>
-                            <button className="px-4 py-2 border border-slate-200 rounded-lg hover:border-brand-500 hover:text-brand-600 text-sm">6:45 PM</button>
-                            <button className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm shadow-lg shadow-brand-500/20">7:15 PM</button>
-                            <button className="px-4 py-2 border border-slate-200 rounded-lg hover:border-brand-500 hover:text-brand-600 text-sm">8:00 PM</button>
-                         </div>
-                      </div>
-                   </div>
-                   <div className="p-6 border-t border-slate-100 flex gap-4 bg-slate-50">
-                      <button onClick={() => setKioskView('HOME')} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
-                      <button className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 shadow-lg shadow-slate-900/30">Confirm</button>
-                   </div>
+                   {kioskView === 'ORDER' ? (
+                      <>
+                        <div className="flex-1 p-8">
+                           <h3 className="text-2xl font-bold mb-6">Your Order</h3>
+                           <div className="space-y-4">
+                              <div className="flex justify-between items-center p-4 bg-slate-50 rounded-xl border border-slate-100">
+                                 <div>
+                                    <p className="font-bold">Spicy Rigatoni</p>
+                                    <p className="text-sm text-slate-500">Extra Spicy</p>
+                                 </div>
+                                 <p className="font-bold">$24.00</p>
+                              </div>
+                           </div>
+                           <div className="mt-8 pt-6 border-t border-slate-100">
+                              <div className="flex justify-between text-lg font-bold">
+                                 <span>Total</span>
+                                 <span>$24.00</span>
+                              </div>
+                           </div>
+                        </div>
+                        <div className="p-6 border-t border-slate-100 flex gap-4 bg-slate-50">
+                           <button onClick={() => setKioskView('HOME')} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
+                           <button className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 shadow-lg shadow-green-500/30">Checkout</button>
+                        </div>
+                      </>
+                   ) : (
+                      <>
+                        <div className="flex-1 p-8">
+                           <h3 className="text-2xl font-bold mb-6">Select Date & Time</h3>
+                           <div className="bg-slate-50 rounded-xl p-4 mb-6 border border-slate-100">
+                              {/* Fake Calendar Grid */}
+                              <div className="grid grid-cols-7 gap-2 text-center text-sm mb-2 font-bold text-slate-400">
+                                 <span>S</span><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span>
+                              </div>
+                              <div className="grid grid-cols-7 gap-2 text-center text-sm font-medium">
+                                 <span className="text-slate-300">29</span><span className="text-slate-300">30</span>
+                                 <span className="p-2">1</span><span className="p-2">2</span><span className="p-2 bg-brand-600 text-white rounded-full">3</span><span className="p-2">4</span><span className="p-2">5</span>
+                              </div>
+                           </div>
+                           <div className="space-y-3">
+                              <p className="font-bold text-sm text-slate-500 uppercase">Available Times</p>
+                              <div className="flex gap-2 flex-wrap">
+                                 <button className="px-4 py-2 border border-slate-200 rounded-lg hover:border-brand-500 hover:text-brand-600 text-sm">6:00 PM</button>
+                                 <button className="px-4 py-2 border border-slate-200 rounded-lg hover:border-brand-500 hover:text-brand-600 text-sm">6:45 PM</button>
+                                 <button className="px-4 py-2 bg-brand-600 text-white rounded-lg text-sm shadow-lg shadow-brand-500/20">7:15 PM</button>
+                                 <button className="px-4 py-2 border border-slate-200 rounded-lg hover:border-brand-500 hover:text-brand-600 text-sm">8:00 PM</button>
+                              </div>
+                           </div>
+                        </div>
+                        <div className="p-6 border-t border-slate-100 flex gap-4 bg-slate-50">
+                           <button onClick={() => setKioskView('HOME')} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
+                           <button className="flex-1 py-3 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 shadow-lg shadow-slate-900/30">Confirm</button>
+                        </div>
+                      </>
+                   )}
                 </div>
              </div>
           )}
