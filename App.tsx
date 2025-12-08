@@ -4,6 +4,9 @@ import { Upload, Check, Store, Link2, Phone, Mic, ArrowRight, Loader2, KeyRound,
 import { Dashboard } from './components/Dashboard';
 import { geminiService } from './services/geminiService';
 import { RestaurantProfile, VoiceOption, ConnectedApp, Reservation, Table } from './types';
+import { getTenantApiKey } from './lib/api-keys';
+import { getCurrentUser } from './lib/auth';
+import { supabase } from './lib/supabase';
 import QRCode from 'react-qr-code';
 
 function App() {
@@ -117,7 +120,7 @@ function App() {
         type: 'API',
         isDefault: true,
         config: {
-          apiKey: 'gf_live_8823719283712',
+          apiKey: '', // Will be set by tenant in Settings
           accountName: 'JoesBistro_GF',
           supportPhone: '+1 (888) 555-0123',
           supportEmail: 'support@gloriafood.com'
@@ -138,6 +141,41 @@ function App() {
   });
 
   const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+  
+  // API Key State
+  const [tenantApiKey, setTenantApiKey] = useState<string | null>(null);
+
+  // Load tenant API key and profile on mount
+  useEffect(() => {
+    const loadUserData = async () => {
+      const user = await getCurrentUser();
+      if (user) {
+        // Fetch tenant API key
+        const apiKey = await getTenantApiKey('gemini');
+        setTenantApiKey(apiKey);
+        
+        // Load restaurant profile from Supabase
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session) {
+          try {
+            // Try to get restaurant profile from user_profiles
+            const { data: profileData } = await supabase
+              .from('user_profiles')
+              .select('profile_data')
+              .eq('user_id', user.id)
+              .single();
+            
+            if (profileData?.profile_data) {
+              setProfile(profileData.profile_data as RestaurantProfile);
+            }
+          } catch (error) {
+            console.error('Error loading profile:', error);
+          }
+        }
+      }
+    };
+    loadUserData();
+  }, []);
 
   // --- Handlers ---
 
@@ -153,7 +191,7 @@ function App() {
       reader.onloadend = async () => {
         const base64String = (reader.result as string).split(',')[1];
         // Send to Gemini to extract text
-        const extractedText = await geminiService.analyzeMenuImage(base64String, file.type);
+        const extractedText = await geminiService.analyzeMenuImage(base64String, file.type, tenantApiKey || undefined);
         setProfile(prev => ({ ...prev, menuContext: extractedText }));
         setLoading(false);
       };
@@ -245,7 +283,7 @@ function App() {
     setPreviewPlaying(voice);
     try {
       const text = `Welcome to ${profile.info.name || 'our restaurant'}. How can I help you today?`;
-      const audioBuffer = await geminiService.generateTTS(text, voice);
+      const audioBuffer = await geminiService.generateTTS(text, voice, tenantApiKey || undefined);
       
       const audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
       const source = audioContext.createBufferSource();
@@ -339,7 +377,7 @@ function App() {
     setIsChatProcessing(true);
 
     try {
-      const updates = await geminiService.updateProfileViaChat(profile, userText);
+      const updates = await geminiService.updateProfileViaChat(profile, userText, tenantApiKey || undefined);
       
       // Apply updates to state
       setProfile(prev => {
@@ -393,7 +431,8 @@ function App() {
       const responseText = await geminiService.sendChatMessage(
          apiHistory, 
          profile.editableSystemPrompt,
-         userText
+         userText,
+         tenantApiKey || undefined
       );
 
       setBotChatHistory(prev => [...prev, { role: 'model', text: responseText }]);
@@ -2370,11 +2409,12 @@ ${orderInstructions}
       {view === 'DASHBOARD' ? (
          <div className="h-full w-full flex flex-col">
             <div className="flex-1 overflow-auto">
-               <Dashboard 
-                  profile={profile} 
-                  onDeploy={() => setView('DEPLOYED')} 
-                  onTextChat={() => setShowTextChat(true)}
-               />
+              <Dashboard 
+                 profile={profile} 
+                 onDeploy={() => setView('DEPLOYED')} 
+                 onTextChat={() => setShowTextChat(true)}
+                 apiKey={tenantApiKey}
+              />
             </div>
             <div className="fixed bottom-6 left-6 z-40">
                <button 

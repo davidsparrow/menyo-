@@ -64,16 +64,25 @@ async function decodeAudioData(
 // --- Main Service Class ---
 
 export class GeminiService {
-  private ai: GoogleGenAI;
+  // Get API key with fallback to env var (for development)
+  private getApiKey(apiKey?: string): string {
+    return apiKey || process.env.API_KEY || process.env.GEMINI_API_KEY || '';
+  }
 
-  constructor() {
-    this.ai = new GoogleGenAI({ apiKey: process.env.API_KEY || '' });
+  // Create GoogleGenAI instance with specific API key
+  private createAI(apiKey?: string): GoogleGenAI {
+    const key = this.getApiKey(apiKey);
+    if (!key) {
+      throw new Error('Gemini API key is required. Please set it in Settings or provide GEMINI_API_KEY environment variable.');
+    }
+    return new GoogleGenAI({ apiKey: key });
   }
 
   // 1. Menu Analysis (using Vision model)
-  async analyzeMenuImage(base64Image: string, mimeType: string): Promise<string> {
+  async analyzeMenuImage(base64Image: string, mimeType: string, apiKey?: string): Promise<string> {
     try {
-      const response = await this.ai.models.generateContent({
+      const ai = this.createAI(apiKey);
+      const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: {
           parts: [
@@ -97,8 +106,9 @@ export class GeminiService {
   }
 
   // 2. Configuration Assistant (Chat to JSON)
-  async updateProfileViaChat(currentProfile: any, userMessage: string): Promise<any> {
+  async updateProfileViaChat(currentProfile: any, userMessage: string, apiKey?: string): Promise<any> {
     try {
+      const ai = this.createAI(apiKey);
       const prompt = `
       You are a Configuration Assistant for a restaurant voice bot. 
       Your goal is to update the restaurant's policies based on the user's natural language request.
@@ -116,7 +126,7 @@ export class GeminiService {
       - Do NOT wrap in markdown code blocks. Just raw JSON.
       `;
 
-      const response = await this.ai.models.generateContent({
+      const response = await ai.models.generateContent({
         model: 'gemini-2.5-flash',
         contents: prompt,
         config: {
@@ -136,10 +146,12 @@ export class GeminiService {
   async sendChatMessage(
     history: { role: string; parts: { text: string }[] }[],
     systemInstruction: string,
-    message: string
+    message: string,
+    apiKey?: string
   ): Promise<string> {
     try {
-      const chat = this.ai.chats.create({
+      const ai = this.createAI(apiKey);
+      const chat = ai.chats.create({
         model: 'gemini-2.5-flash',
         config: {
           systemInstruction: systemInstruction,
@@ -160,15 +172,17 @@ export class GeminiService {
     voiceName: VoiceOption,
     systemInstruction: string, // Full prompt passed from App state
     onAudioData: (buffer: AudioBuffer) => void,
-    onClose: () => void
+    onClose: () => void,
+    apiKey?: string
   ): Promise<{ disconnect: () => void; sendAudio: (data: Float32Array) => void }> {
     
+    const ai = this.createAI(apiKey);
     let nextStartTime = 0;
     const outputAudioContext = new (window.AudioContext || (window as any).webkitAudioContext)({ sampleRate: 24000 });
     const outputNode = outputAudioContext.createGain();
     outputNode.connect(outputAudioContext.destination); // Connect to speakers
     
-    const sessionPromise = this.ai.live.connect({
+    const sessionPromise = ai.live.connect({
       model: 'gemini-2.5-flash-native-audio-preview-09-2025',
       config: {
         responseModalities: [Modality.AUDIO],
@@ -230,9 +244,10 @@ export class GeminiService {
   }
 
   // 5. Generate Text-to-Speech (TTS) matching the Native Voice
-  async generateTTS(text: string, voiceName: string): Promise<AudioBuffer> {
+  async generateTTS(text: string, voiceName: string, apiKey?: string): Promise<AudioBuffer> {
     try {
-      const response = await this.ai.models.generateContent({
+      const ai = this.createAI(apiKey);
+      const response = await ai.models.generateContent({
         model: "gemini-2.5-flash-preview-tts",
         contents: {
           parts: [{ text: text }],
@@ -262,4 +277,6 @@ export class GeminiService {
   }
 }
 
+// Export singleton instance for backward compatibility
+// But methods now accept apiKey parameter for tenant-specific keys
 export const geminiService = new GeminiService();

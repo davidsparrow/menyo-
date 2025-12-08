@@ -9,6 +9,7 @@ interface DashboardProps {
   profile: RestaurantProfile;
   onDeploy: () => void;
   onTextChat: () => void;
+  apiKey?: string | null;
 }
 
 const mockData = [
@@ -21,7 +22,7 @@ const mockData = [
   { name: 'Sun', calls: 30 },
 ];
 
-export const Dashboard: React.FC<DashboardProps> = ({ profile, onDeploy, onTextChat }) => {
+export const Dashboard: React.FC<DashboardProps> = ({ profile, onDeploy, onTextChat, apiKey }) => {
   const [isLiveDemoActive, setIsLiveDemoActive] = useState(false);
   const [liveClient, setLiveClient] = useState<{ disconnect: () => void; sendAudio: (d: Float32Array) => void } | null>(null);
   const [volume, setVolume] = useState(0);
@@ -51,7 +52,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ profile, onDeploy, onTextC
           setLiveClient(null);
           stream.getTracks().forEach(t => t.stop());
           audioContext.close();
-        }
+        },
+        apiKey || undefined
       );
 
       processor.onaudioprocess = (e) => {

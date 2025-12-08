@@ -101,3 +101,35 @@ export enum VoiceOption {
   Kore = 'Kore',
   Fenrir = 'Fenrir',
 }
+
+// Authentication Types
+export type UserRole = 'super-admin' | 'admin' | 'user';
+export type PlanType = 'FREE' | 'PRO' | 'ENTERPRISE';
+
+export interface User {
+  id: string;
+  email: string;
+  role: UserRole;
+  tenant_id: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface UserProfile {
+  id: string;
+  user_id: string;
+  tenant_id: string | null;
+  plan: PlanType;
+  profile_data: RestaurantProfile | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Tenant {
+  id: string;
+  name: string;
+  owner_id: string;
+  plan: PlanType;
+  created_at: string;
+  updated_at: string;
+}
