@@ -66,6 +66,40 @@ export interface Reservation {
   hasConflict?: boolean;
 }
 
+// Order Types for Gloria Foods Integration
+export interface OrderItem {
+  itemId: string;
+  itemName: string;
+  quantity: number;
+  price: number;
+  modifiers?: Array<{
+    modifierId: string;
+    optionId: string;
+  }>;
+  specialInstructions?: string;
+}
+
+export interface Order {
+  id: string;
+  restaurantId: string;
+  tenantId: string;
+  gloriaFoodsOrderId?: string; // External order ID from Gloria Foods
+  customerName: string;
+  phone: string;
+  email?: string;
+  items: OrderItem[];
+  orderType: 'PICKUP' | 'DELIVERY';
+  deliveryAddress?: string;
+  total: number;
+  status: 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'COMPLETED' | 'CANCELLED';
+  checkoutUrl?: string; // For hybrid approach - redirect URL
+  estimatedReadyTime?: string;
+  actualReadyTime?: string;
+  specialInstructions?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface RestaurantProfile {
   id: string;
   info: BusinessInfo;
