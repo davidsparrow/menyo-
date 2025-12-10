@@ -251,20 +251,94 @@ function App() {
     if (!gloriaInput.trim()) return;
     setLoading(true);
     
-    // Simulate Gloria Foods API validation and sync
-    await new Promise(r => setTimeout(r, 2000));
+    try {
+      // Get current session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        alert('Please log in to connect Gloria Foods');
+        setLoading(false);
+        return;
+      }
+
+      // Store token in API keys table
+      const response = await fetch('/api/restaurants/current/api-key?key_type=gloria_foods', {
+        method: 'PUT',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ api_key: gloriaInput }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to store Gloria Foods token');
+      }
+
+      // Update profile
+      setProfile(prev => ({
+        ...prev,
+        gloriaFoodsToken: gloriaInput,
+        integrations: { ...prev.integrations, gloriaFoods: true },
+        bookingPreference: 'GLORIA_FOODS', // Default to Gloria if connected
+        // Also update the connected app config for consistency
+        connectedApps: prev.connectedApps.map(app => 
+          app.id === 'app_gloria' ? { ...app, config: { ...app.config, apiKey: gloriaInput } } : app
+        )
+      }));
+
+      // Automatically sync menu after connecting
+      await syncGloriaFoodsMenu();
+      
+    } catch (error: any) {
+      console.error('Error connecting Gloria Foods:', error);
+      alert(error.message || 'Failed to connect Gloria Foods. Please check your token.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const syncGloriaFoodsMenu = async () => {
+    if (!profile.integrations.gloriaFoods) return;
     
-    setProfile(prev => ({
-      ...prev,
-      gloriaFoodsToken: gloriaInput,
-      integrations: { ...prev.integrations, gloriaFoods: true },
-      bookingPreference: 'GLORIA_FOODS', // Default to Gloria if connected
-      // Also update the connected app config for consistency
-      connectedApps: prev.connectedApps.map(app => 
-        app.id === 'app_gloria' ? { ...app, config: { ...app.config, apiKey: gloriaInput } } : app
-      )
-    }));
-    setLoading(false);
+    setLoading(true);
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        alert('Please log in to sync menu');
+        setLoading(false);
+        return;
+      }
+
+      // Fetch menu from Gloria Foods
+      const response = await fetch('/api/gloria-foods/menu', {
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to fetch menu from Gloria Foods');
+      }
+
+      const data = await response.json();
+      
+      // Update menu context with synced menu
+      setProfile(prev => ({
+        ...prev,
+        menuContext: data.menuContext || prev.menuContext,
+      }));
+
+      // Show success message
+      alert('Menu synced successfully from Gloria Foods!');
+      
+    } catch (error: any) {
+      console.error('Error syncing menu:', error);
+      alert(error.message || 'Failed to sync menu from Gloria Foods');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const getTwilioNumber = async () => {
@@ -1082,8 +1156,27 @@ ${orderInstructions}
               </p>
             </div>
           ) : (
-             <div className="text-sm text-green-700 font-medium flex items-center gap-2 bg-green-50 py-2 px-3 rounded-lg w-fit">
-                <Check className="w-4 h-4" /> API Connected • Menu & Inventory Synced
+             <div className="space-y-3">
+                <div className="text-sm text-green-700 font-medium flex items-center gap-2 bg-green-50 py-2 px-3 rounded-lg w-fit">
+                   <Check className="w-4 h-4" /> API Connected
+                </div>
+                <button
+                   onClick={syncGloriaFoodsMenu}
+                   disabled={loading}
+                   className="text-sm bg-orange-100 text-orange-700 px-4 py-2 rounded-lg font-medium hover:bg-orange-200 disabled:opacity-50 flex items-center gap-2"
+                >
+                   {loading ? (
+                      <>
+                         <Loader2 className="w-4 h-4 animate-spin" />
+                         Syncing...
+                      </>
+                   ) : (
+                      <>
+                         <RefreshCw className="w-4 h-4" />
+                         Sync Menu from Gloria Foods
+                      </>
+                   )}
+                </button>
              </div>
           )}
         </div>
