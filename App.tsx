@@ -61,6 +61,10 @@ function App() {
   const kioskChatEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null); // For Kiosk Mic Toggle
   const ttsSourceRef = useRef<AudioBufferSourceNode | null>(null); // Track active TTS source
+  
+  // Order completion state (for Gloria Foods hybrid approach)
+  const [pendingOrderCheckoutUrl, setPendingOrderCheckoutUrl] = useState<string | null>(null);
+  const [isPreparingOrder, setIsPreparingOrder] = useState(false);
 
   // Test Bot Text Chat State
   const [showTextChat, setShowTextChat] = useState(false);
@@ -465,8 +469,21 @@ function App() {
     }
 
     const orderInstructions = p.integrations.gloriaFoods 
-      ? `- You can place takeout orders using the 'gloria_order' tool. Confirm items against the menu.`
-      : `- For takeout orders, please ask them to call ${p.humanSupportPhone || p.info.phone} or visit our website.`;
+      ? `- When a customer wants to place an order:
+  1. Ask what they'd like to order and collect ALL details:
+     * Menu items and quantities
+     * Any modifications or customizations
+     * Dietary restrictions or allergies
+     * Pickup or delivery preference
+     * Customer name and phone number
+     * Special instructions
+  2. Confirm the complete order summary with total price
+  3. When customer confirms (says "yes", "that's correct", etc.), say:
+     "Perfect! I've prepared your order. You'll receive a secure checkout link to complete payment. It should appear on your screen shortly."
+  4. DO NOT try to generate URLs or checkout links yourself - the system will handle that automatically.
+- Always verify items are available before confirming.
+- If an item is unavailable, suggest alternatives.`
+      : `- For takeout orders, please ask them to call ${p.humanSupportPhone || p.info.phone} or visit our website at ${p.info.website || 'our website'}.`;
 
     const prompt = `You are an AI Voice Assistant for ${p.info.name}, a ${p.info.cuisine} restaurant located at ${p.info.address}.
 Your voice should be friendly, professional, and efficient.
@@ -686,12 +703,134 @@ ${orderInstructions}
       setKioskChatHistory(prev => [...prev, { role: 'model', text: responseText }]);
       await speakText(responseText);
 
+      // Check if AI response indicates order is ready (for Gloria Foods integration)
+      if (kioskView === 'ORDER' && profile.integrations.gloriaFoods) {
+        const orderReadyKeywords = ['prepared your order', 'checkout', 'complete payment', 'secure checkout link'];
+        const isOrderReady = orderReadyKeywords.some(keyword => 
+          responseText.toLowerCase().includes(keyword.toLowerCase())
+        );
+        
+        if (isOrderReady) {
+          // Order is confirmed - prepare to show checkout button
+          // We'll extract order details and prepare order when user clicks "Complete Order"
+        }
+      }
+
     } catch (err) {
        console.error(err);
        setKioskChatHistory(prev => [...prev, { role: 'model', text: "I'm having trouble connecting. Please try again." }]);
     } finally {
       setIsKioskProcessing(false);
     }
+  };
+
+  // Handle order completion - extract order details and call API
+  const handleCompleteOrder = async () => {
+    if (!profile.integrations.gloriaFoods || kioskView !== 'ORDER') return;
+    
+    setIsPreparingOrder(true);
+    
+    try {
+      // Extract order details from conversation
+      // This is a simplified extraction - in production, you'd want more sophisticated NLP
+      const conversationText = kioskChatHistory.map(msg => msg.text).join(' ');
+      
+      // For MVP, we'll prompt user for basic info if not in conversation
+      // In production, you'd parse the conversation more intelligently
+      const customerName = extractFromConversation(conversationText, ['name', 'i\'m', 'this is']) || 'Customer';
+      const phone = extractFromConversation(conversationText, ['phone', 'number']) || '';
+      
+      // Extract items (simplified - would need better parsing in production)
+      // For now, we'll create a basic order structure
+      // In production, you'd parse items, quantities, prices from conversation
+      const items = extractOrderItems(conversationText);
+      
+      if (items.length === 0) {
+        alert('Could not extract order items. Please continue the conversation with the AI to specify your order.');
+        setIsPreparingOrder(false);
+        return;
+      }
+
+      // Get session token for API call
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) {
+        alert('Please log in to place an order.');
+        setIsPreparingOrder(false);
+        return;
+      }
+
+      // Call API to prepare order
+      const response = await fetch('/api/gloria-foods/orders', {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          customerName,
+          phone: phone || '000-000-0000', // Fallback if not provided
+          items,
+          orderType: 'PICKUP', // Default to pickup, could be extracted from conversation
+          specialInstructions: extractFromConversation(conversationText, ['special', 'note', 'instruction']),
+        }),
+      });
+
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to prepare order');
+      }
+
+      const data = await response.json();
+      setPendingOrderCheckoutUrl(data.order.checkoutUrl);
+      
+      // Add message to chat
+      setKioskChatHistory(prev => [...prev, {
+        role: 'model',
+        text: `Your order is ready! Click the button below to complete payment securely.`
+      }]);
+
+    } catch (error: any) {
+      console.error('Error preparing order:', error);
+      setKioskChatHistory(prev => [...prev, {
+        role: 'model',
+        text: `I'm sorry, there was an issue preparing your order. Please try again or call us at ${profile.info.phone || 'our phone number'}.`
+      }]);
+    } finally {
+      setIsPreparingOrder(false);
+    }
+  };
+
+  // Helper to extract text from conversation (simplified)
+  const extractFromConversation = (text: string, keywords: string[]): string | null => {
+    // Very basic extraction - in production, use proper NLP
+    for (const keyword of keywords) {
+      const regex = new RegExp(`${keyword}[\\s:]+([^\\n\\.]+)`, 'i');
+      const match = text.match(regex);
+      if (match) return match[1].trim();
+    }
+    return null;
+  };
+
+  // Helper to extract order items from conversation (simplified)
+  // TODO: This needs proper NLP implementation to extract:
+  // - Menu items and quantities from natural language
+  // - Match items to actual menu items from Gloria Foods
+  // - Extract prices
+  // Options:
+  // 1. Use Gemini function calling to have AI output structured order data
+  // 2. Implement NLP parsing of conversation
+  // 3. Use a structured form-based approach to collect order details
+  const extractOrderItems = (text: string): Array<{itemId: string, itemName: string, quantity: number, price: number}> => {
+    // Placeholder implementation - returns empty array
+    // In production, this would parse conversation and match to menu items
+    // For now, this prevents the order flow from working fully
+    // The UI structure is ready - just needs proper order extraction
+    
+    // Example of what we'd need to extract:
+    // "I want 2 margherita pizzas and 1 caesar salad" 
+    // -> [{itemId: 'pizza_123', itemName: 'Margherita Pizza', quantity: 2, price: 18.00}, ...]
+    
+    return [];
   };
   
   useEffect(() => {
@@ -2243,7 +2382,34 @@ ${orderInstructions}
                         </div>
                         <div className="p-6 border-t border-slate-100 flex gap-4 bg-slate-50">
                            <button onClick={resetKioskSession} className="flex-1 py-3 bg-white border border-slate-200 rounded-xl font-bold text-slate-600 hover:bg-slate-100">Cancel</button>
-                           <button onClick={() => { alert('Order Placed! Simulating receipt...'); resetKioskSession(); }} className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 shadow-lg shadow-green-500/30">Checkout</button>
+                           {pendingOrderCheckoutUrl ? (
+                              <a 
+                                 href={pendingOrderCheckoutUrl}
+                                 target="_blank"
+                                 rel="noopener noreferrer"
+                                 className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 shadow-lg shadow-green-500/30 text-center flex items-center justify-center gap-2"
+                              >
+                                 <ExternalLink className="w-4 h-4" />
+                                 Complete Payment
+                              </a>
+                           ) : profile.integrations.gloriaFoods ? (
+                              <button 
+                                 onClick={handleCompleteOrder}
+                                 disabled={isPreparingOrder}
+                                 className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 shadow-lg shadow-green-500/30 disabled:opacity-50 disabled:cursor-not-allowed flex items-center justify-center gap-2"
+                              >
+                                 {isPreparingOrder ? (
+                                    <>
+                                       <Loader2 className="w-4 h-4 animate-spin" />
+                                       Preparing...
+                                    </>
+                                 ) : (
+                                    'Complete Order'
+                                 )}
+                              </button>
+                           ) : (
+                              <button onClick={() => { alert('Order Placed! Simulating receipt...'); resetKioskSession(); }} className="flex-1 py-3 bg-green-600 text-white rounded-xl font-bold hover:bg-green-700 shadow-lg shadow-green-500/30">Checkout</button>
+                           )}
                         </div>
                       </>
                    ) : (

@@ -99,9 +99,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .single();
 
       if (restaurantData) {
-        // Insert order into database (we'll create the orders table in next chunk)
-        // For now, we'll just return the prepared order
-        // TODO: Store order in database when orders table is created
+        // Insert order into database
+        const { error: insertError } = await supabase
+          .from('orders')
+          .insert({
+            restaurant_id: restaurantData.id,
+            tenant_id: tenantId,
+            gloria_foods_order_id: preparedOrder.orderId,
+            customer_name: orderData.customerName,
+            phone: orderData.phone,
+            email: orderData.email,
+            items: orderData.items,
+            order_type: orderData.orderType,
+            delivery_address: orderData.deliveryAddress,
+            total: preparedOrder.total,
+            status: 'PENDING',
+            checkout_url: preparedOrder.checkoutUrl,
+            estimated_ready_time: preparedOrder.estimatedReadyTime,
+            special_instructions: orderData.specialInstructions,
+          });
+
+        if (insertError) {
+          console.error('Error storing order in database:', insertError);
+          // Continue anyway - order is prepared, just not tracked in DB
+        }
       }
 
       return res.status(200).json({
