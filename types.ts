@@ -46,24 +46,97 @@ export interface ConnectedApp {
   };
 }
 
+// Table Types (matches database schema)
 export interface Table {
+  id: string;
+  restaurant_id: string;
+  tenant_id: string;
+  table_number: number;
+  name: string;
+  max_guests: number;
+  min_guests?: number;
+  location?: string; // e.g., "Indoor", "Patio", "Window", "Private Room"
+  features?: string[]; // e.g., ["wheelchair_accessible", "high_chair", "outdoor"]
+  is_active?: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// Legacy Table interface for backward compatibility (used in RestaurantProfile)
+export interface TableLegacy {
   id: string;
   autoNumber: number;
   name: string;
   maxGuests: number;
 }
 
+// Reservation Source Types
+export type ReservationSource = 'LOCAL' | 'GLORIA_FOODS' | 'GOOGLE_CALENDAR' | 'PHONE' | 'WALK_IN';
+
+// Reservation Types (matches enhanced database schema)
 export interface Reservation {
   id: string;
-  customerName: string;
-  time: string; // ISO string or simple time string for mock
-  date: string; // YYYY-MM-DD
-  partySize: number;
+  restaurant_id: string;
+  tenant_id: string;
+  customer_name: string;
+  date: string; // YYYY-MM-DD (legacy, use reservation_datetime)
+  time: string; // TIME format (legacy, use reservation_datetime)
+  reservation_datetime?: string; // ISO 8601 TIMESTAMPTZ
+  end_datetime?: string; // ISO 8601 TIMESTAMPTZ (auto-calculated)
+  duration_minutes?: number; // Default 120 (2 hours)
+  party_size: number;
   status: 'CONFIRMED' | 'PENDING' | 'CANCELLED';
-  phone: string;
-  notes?: string;
-  tableIds?: string[];
-  hasConflict?: boolean;
+  phone?: string;
+  email?: string;
+  notes?: string; // Legacy field
+  customer_notes?: string; // Customer's special notes
+  internal_notes?: string; // Staff notes (not visible to customer)
+  special_requests?: string; // Dietary restrictions, accessibility needs, etc.
+  table_ids?: string[]; // Legacy array (use reservation_tables junction table)
+  has_conflict?: boolean; // Legacy field
+  gloria_foods_reservation_id?: string; // External ID from Gloria Foods
+  source?: ReservationSource; // Default 'LOCAL'
+  confirmed_at?: string;
+  cancelled_at?: string;
+  cancellation_reason?: string;
+  no_show?: boolean;
+  checked_in_at?: string;
+  checked_out_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+// Reservation-Tables junction table (many-to-many)
+export interface ReservationTable {
+  id: string;
+  reservation_id: string;
+  table_id: string;
+  created_at: string;
+}
+
+// Time Slot Capacity (for availability checking)
+export interface TimeSlotCapacity {
+  id: string;
+  restaurant_id: string;
+  tenant_id: string;
+  slot_date: string; // DATE format YYYY-MM-DD
+  slot_time: string; // TIME format HH:MM:SS
+  slot_duration_minutes: number; // 30 or 60
+  total_capacity: number;
+  reserved_guests: number;
+  available_capacity: number; // Generated: total_capacity - reserved_guests
+  table_count?: number;
+  created_at: string;
+  updated_at: string;
+}
+
+// Availability Check Result
+export interface AvailabilityCheckResult {
+  is_available: boolean;
+  available_capacity: number;
+  current_reserved_guests: number;
+  total_capacity: number;
+  conflicting_reservations: number;
 }
 
 // Order Types for Gloria Foods Integration
@@ -119,7 +192,7 @@ export interface RestaurantProfile {
   // Reservation Settings
   maxGroupSize: number;
   maxGuestsPerHour: number;
-  tables: Table[];
+  tables: TableLegacy[]; // Legacy format (stored in JSONB, will migrate to tables table)
 
   // Security
   adminPassword?: string;
