@@ -7,6 +7,7 @@ import { RestaurantProfile, VoiceOption, ConnectedApp, Reservation, Table } from
 import { getTenantApiKey } from './lib/api-keys';
 import { getCurrentUser } from './lib/auth';
 import { supabase } from './lib/supabase';
+import { checkReservationAvailability, createReservation, getAvailableSlots } from './lib/reservations';
 import QRCode from 'react-qr-code';
 
 function App() {
@@ -534,8 +535,22 @@ function App() {
     
     let bookingInstructions = "";
     if (p.bookingPreference === 'GLORIA_FOODS' && p.integrations.gloriaFoods) {
-      bookingInstructions = `- Use the 'gloria_reserve' tool to check availability and book tables for parties.
-- If the party size is larger than 8, please politely ask them to call the restaurant directly at ${p.humanSupportPhone || p.info.phone}.`;
+      bookingInstructions = `- When a customer wants to make a reservation:
+  1. Ask for: date, time, party size, customer name, and phone number
+  2. IMPORTANT: Before confirming, you MUST check availability using the reservation system
+  3. The system will check:
+     * Existing reservations in that time slot
+     * Maximum guests per hour limit (${p.maxGuestsPerHour} guests/hour)
+     * Table availability
+  4. If the time slot is NOT available:
+     * Apologize and explain the conflict
+     * Suggest alternative times (e.g., "We're full at 7pm, but we have availability at 6:30pm or 7:30pm")
+     * Ask if they'd like one of those times instead
+  5. If the time slot IS available:
+     * Confirm all details: "Perfect! I have you down for [party size] on [date] at [time]. Your name is [name] and phone is [phone]. Is that correct?"
+  6. When customer confirms, say: "Great! Your reservation is confirmed. You'll receive a confirmation shortly."
+  7. DO NOT create the reservation yourself - the system will handle it automatically when you confirm
+- If the party size is larger than ${p.maxGroupSize}, please politely ask them to call the restaurant directly at ${p.humanSupportPhone || p.info.phone}.`;
     } else if (p.bookingPreference === 'CUSTOM' && p.customBookingUrl) {
       bookingInstructions = `- Direct customers to book online at ${p.customBookingUrl}. Do not attempt to take the reservation yourself.`;
     } else {
@@ -790,6 +805,19 @@ ${orderInstructions}
         }
       }
 
+      // Check if AI response indicates reservation is confirmed
+      if (kioskView === 'RESERVE') {
+        const reservationConfirmedKeywords = ['confirmed', 'reservation is confirmed', 'booked', 'reserved'];
+        const isReservationConfirmed = reservationConfirmedKeywords.some(keyword => 
+          responseText.toLowerCase().includes(keyword.toLowerCase())
+        );
+        
+        if (isReservationConfirmed) {
+          // Try to extract reservation details and create it
+          await handleReservationConfirmation(kioskChatHistory, responseText);
+        }
+      }
+
     } catch (err) {
        console.error(err);
        setKioskChatHistory(prev => [...prev, { role: 'model', text: "I'm having trouble connecting. Please try again." }]);
@@ -905,6 +933,105 @@ ${orderInstructions}
     // -> [{itemId: 'pizza_123', itemName: 'Margherita Pizza', quantity: 2, price: 18.00}, ...]
     
     return [];
+  };
+
+  // Handle reservation confirmation - extract details and create reservation
+  const handleReservationConfirmation = async (chatHistory: Array<{role: 'user' | 'model', text: string}>, aiResponse: string) => {
+    try {
+      // Extract reservation details from conversation
+      // This is simplified - in production, use Gemini function calling for structured data
+      const conversationText = chatHistory.map(msg => msg.text).join(' ');
+      
+      // Try to extract date, time, party size, name, phone from conversation
+      // This is a basic regex-based extraction - should be replaced with function calling
+      const dateMatch = conversationText.match(/(\d{4}-\d{2}-\d{2}|\d{1,2}\/\d{1,2}\/\d{4}|\w+day|\d{1,2}\s+\w+)/i);
+      const timeMatch = conversationText.match(/(\d{1,2}):?(\d{2})?\s*(am|pm|AM|PM)?/i) || conversationText.match(/(\d{1,2})\s*(am|pm|AM|PM)/i);
+      const partySizeMatch = conversationText.match(/(\d+)\s*(people|guests|party|person)/i);
+      const nameMatch = conversationText.match(/(?:name|i'm|this is|call me)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)/i);
+      const phoneMatch = conversationText.match(/(\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}|\d{10})/);
+      
+      if (!dateMatch || !timeMatch || !partySizeMatch) {
+        console.log('Could not extract all required reservation details');
+        return; // Can't create reservation without required fields
+      }
+
+      // Get restaurant ID
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      const user = await getCurrentUser();
+      if (!user || !user.tenant_id) return;
+
+      const { data: restaurant } = await supabase
+        .from('restaurants')
+        .select('id')
+        .eq('tenant_id', user.tenant_id)
+        .single();
+
+      if (!restaurant) return;
+
+      // Parse date and time
+      let reservationDate = dateMatch[1];
+      let reservationTime = timeMatch[0];
+      
+      // Convert time to 24-hour format if needed
+      if (timeMatch[3] && (timeMatch[3].toLowerCase() === 'pm' || timeMatch[3].toLowerCase() === 'p.m.')) {
+        const hour = parseInt(timeMatch[1]);
+        if (hour < 12) {
+          reservationTime = `${hour + 12}:${timeMatch[2] || '00'}`;
+        }
+      } else if (timeMatch[3] && timeMatch[3].toLowerCase() === 'am' && parseInt(timeMatch[1]) === 12) {
+        reservationTime = `00:${timeMatch[2] || '00'}`;
+      }
+
+      // Create ISO datetime string
+      const reservationDatetime = `${reservationDate}T${reservationTime}:00`;
+      const partySize = parseInt(partySizeMatch[1]);
+      const customerName = nameMatch ? nameMatch[1] : 'Guest';
+      const phone = phoneMatch ? phoneMatch[1] : '';
+
+      // Check availability before creating
+      const date = reservationDate.includes('/') 
+        ? new Date(reservationDate).toISOString().split('T')[0]
+        : reservationDate;
+      const time = reservationTime.includes(':') ? reservationTime : `${reservationTime}:00`;
+
+      const availability = await checkReservationAvailability(
+        restaurant.id,
+        date,
+        time,
+        partySize
+      );
+
+      if (!availability || !availability.is_available) {
+        // Add message to chat about unavailability
+        const unavailabilityMessage = `I'm sorry, but that time slot is not available. ${availability ? `We have ${availability.available_capacity} seats available, but you need ${partySize}.` : 'Please try a different time.'}`;
+        setKioskChatHistory(prev => [...prev, { role: 'model', text: unavailabilityMessage }]);
+        await speakText(unavailabilityMessage);
+        return;
+      }
+
+      // Create reservation
+      const reservation = await createReservation(restaurant.id, {
+        customer_name: customerName,
+        reservation_datetime: reservationDatetime,
+        party_size: partySize,
+        phone: phone || undefined,
+        source: 'LOCAL',
+      });
+
+      if (reservation) {
+        const confirmationMessage = `Perfect! Your reservation for ${partySize} on ${date} at ${time} is confirmed. You'll receive a confirmation shortly.`;
+        setKioskChatHistory(prev => [...prev, { role: 'model', text: confirmationMessage }]);
+        await speakText(confirmationMessage);
+      }
+
+    } catch (error: any) {
+      console.error('Error creating reservation:', error);
+      const errorMessage = `I'm sorry, there was an issue confirming your reservation. ${error.message || 'Please try again or call us.'}`;
+      setKioskChatHistory(prev => [...prev, { role: 'model', text: errorMessage }]);
+      await speakText(errorMessage);
+    }
   };
   
   useEffect(() => {
