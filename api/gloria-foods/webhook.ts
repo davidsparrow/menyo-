@@ -158,3 +158,4 @@ function mapGloriaFoodsStatus(status: string): 'PENDING' | 'CONFIRMED' | 'PREPAR
   
   return statusMap[status?.toLowerCase()] || 'PENDING';
 }
+

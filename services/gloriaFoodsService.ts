@@ -373,3 +373,4 @@ export class GloriaFoodsService {
 export function createGloriaFoodsService(restaurantToken: string, masterKey?: string): GloriaFoodsService {
   return new GloriaFoodsService(restaurantToken, masterKey);
 }
+
