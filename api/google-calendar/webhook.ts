@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
-import { GoogleCalendarService } from '@/services/googleCalendarService';
+import { GoogleCalendarService } from '../../../services/googleCalendarService.js';
 
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -121,7 +121,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const event = await service.getEvent(watch.calendar_id, eventId);
 
         // Import calendarSync function (will be created next)
-        const { syncGoogleEventToReservation } = await import('@/lib/calendarSync');
+        const { syncGoogleEventToReservation } = await import('../../../lib/calendarSync.js');
         await syncGoogleEventToReservation(event, watch.restaurant_id, watch.tenant_id, watch.calendar_id);
 
         return res.status(200).json({ received: true, processed: true });
