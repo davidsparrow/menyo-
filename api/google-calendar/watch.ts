@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
-import { GoogleCalendarService } from '../../../services/googleCalendarService';
+import { GoogleCalendarService } from '@/services/googleCalendarService';
 
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
