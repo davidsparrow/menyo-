@@ -2,6 +2,7 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import App from './App';
 import { ProtectedRoute } from './components/Auth/ProtectedRoute';
+import { ErrorBoundary } from './components/ErrorBoundary';
 
 const rootElement = document.getElementById('root');
 if (!rootElement) {
@@ -11,8 +12,10 @@ if (!rootElement) {
 const root = ReactDOM.createRoot(rootElement);
 root.render(
   <React.StrictMode>
-    <ProtectedRoute>
-      <App />
-    </ProtectedRoute>
+    <ErrorBoundary>
+      <ProtectedRoute>
+        <App />
+      </ProtectedRoute>
+    </ErrorBoundary>
   </React.StrictMode>
 );
