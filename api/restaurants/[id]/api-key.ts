@@ -8,15 +8,19 @@ const encryptionKey = process.env.ENCRYPTION_KEY || 'default-key-change-in-produ
 
 // Simple encryption/decryption (in production, use a more secure method)
 function encrypt(text: string): string {
-  const cipher = crypto.createCipher('aes-256-cbc', encryptionKey);
+  const iv = crypto.randomBytes(16);
+  const cipher = crypto.createCipheriv('aes-256-cbc', Buffer.from(encryptionKey.padEnd(32).slice(0, 32)), iv);
   let encrypted = cipher.update(text, 'utf8', 'hex');
   encrypted += cipher.final('hex');
-  return encrypted;
+  return iv.toString('hex') + ':' + encrypted;
 }
 
 function decrypt(encrypted: string): string {
-  const decipher = crypto.createDecipher('aes-256-cbc', encryptionKey);
-  let decrypted = decipher.update(encrypted, 'hex', 'utf8');
+  const parts = encrypted.split(':');
+  const iv = Buffer.from(parts[0], 'hex');
+  const encryptedText = parts[1];
+  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(encryptionKey.padEnd(32).slice(0, 32)), iv);
+  let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
   decrypted += decipher.final('utf8');
   return decrypted;
 }

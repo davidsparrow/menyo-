@@ -173,7 +173,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const profileData = (restaurantProfile?.profile_data as any) || {};
         if (profileData.integrations?.googleCalendar) {
-          const { syncReservationToGoogleCalendar } = await import('../../../lib/calendarSync');
+          const { syncReservationToGoogleCalendar } = await import('../../../lib/calendarSync.js');
           await syncReservationToGoogleCalendar(reservation.id, restaurant_id, tenantId);
         }
       } catch (syncError) {
