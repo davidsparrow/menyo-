@@ -136,10 +136,28 @@ export const Dashboard: React.FC<DashboardProps> = ({ profile, onDeploy, onTextC
               <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
                 <div className="flex items-center gap-3">
                   <div className="w-8 h-8 bg-orange-100 text-orange-600 rounded flex items-center justify-center font-bold">GF</div>
-                  <span>Gloria Foods (Orders/Reservations)</span>
+                  <span>Gloria Foods Orders</span>
                 </div>
-                <span className={profile.integrations.gloriaFoods ? "text-green-600 text-sm font-medium" : "text-slate-400 text-sm"}>
-                   {profile.integrations.gloriaFoods ? 'Connected' : 'Not Connected'}
+                <span className={profile.integrations.gloriaFoodsOrders ? "text-green-600 text-sm font-medium" : "text-slate-400 text-sm"}>
+                   {profile.integrations.gloriaFoodsOrders ? 'Connected' : 'Not Connected'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-orange-100 text-orange-600 rounded flex items-center justify-center font-bold">GF</div>
+                  <span>Gloria Foods Calendar</span>
+                </div>
+                <span className={profile.integrations.gloriaFoodsCalendar ? "text-green-600 text-sm font-medium" : "text-slate-400 text-sm"}>
+                   {profile.integrations.gloriaFoodsCalendar ? 'Connected' : 'Not Connected'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-blue-100 text-blue-600 rounded flex items-center justify-center font-bold">GC</div>
+                  <span>Google Calendar</span>
+                </div>
+                <span className={profile.integrations.googleCalendar ? "text-green-600 text-sm font-medium" : "text-slate-400 text-sm"}>
+                   {profile.integrations.googleCalendar ? 'Connected' : 'Not Connected'}
                 </span>
               </div>
             </div>

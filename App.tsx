@@ -88,7 +88,9 @@ function App() {
     menuContext: '',
     integrations: {
       googleBusiness: false,
-      gloriaFoods: false,
+      gloriaFoodsOrders: false,
+      gloriaFoodsCalendar: false,
+      googleCalendar: false,
       twilio: false,
     },
     voiceId: VoiceOption.Zephyr,
@@ -276,20 +278,17 @@ function App() {
         throw new Error(error.error || 'Failed to store Gloria Foods token');
       }
 
-      // Update profile
+      // Update profile (don't auto-enable integrations - user enables them separately)
       setProfile(prev => ({
         ...prev,
         gloriaFoodsToken: gloriaInput,
-        integrations: { ...prev.integrations, gloriaFoods: true },
-        bookingPreference: 'GLORIA_FOODS', // Default to Gloria if connected
         // Also update the connected app config for consistency
         connectedApps: prev.connectedApps.map(app => 
           app.id === 'app_gloria' ? { ...app, config: { ...app.config, apiKey: gloriaInput } } : app
         )
       }));
 
-      // Automatically sync menu after connecting
-      await syncGloriaFoodsMenu();
+      alert('Gloria Foods API token saved! Now enable Orders or Calendar integrations below.');
       
     } catch (error: any) {
       console.error('Error connecting Gloria Foods:', error);
@@ -300,7 +299,7 @@ function App() {
   };
 
   const syncGloriaFoodsMenu = async () => {
-    if (!profile.integrations.gloriaFoods) return;
+    if (!profile.integrations.gloriaFoodsOrders) return;
     
     setLoading(true);
     try {
@@ -534,7 +533,7 @@ function App() {
     const p = profile;
     
     let bookingInstructions = "";
-    if (p.bookingPreference === 'GLORIA_FOODS' && p.integrations.gloriaFoods) {
+    if (p.bookingPreference === 'GLORIA_FOODS' && p.integrations.gloriaFoodsCalendar) {
       bookingInstructions = `- When a customer wants to make a reservation:
   1. Ask for: date, time, party size, customer name, and phone number
   2. IMPORTANT: Before confirming, you MUST check availability using the reservation system
@@ -557,7 +556,7 @@ function App() {
       bookingInstructions = `- For all reservation requests, please transfer them to the human host or provide the phone number: ${p.humanSupportPhone || p.info.phone}.`;
     }
 
-    const orderInstructions = p.integrations.gloriaFoods 
+    const orderInstructions = p.integrations.gloriaFoodsOrders 
       ? `- When a customer wants to place an order:
   1. Ask what they'd like to order and collect ALL details:
      * Menu items and quantities
@@ -793,7 +792,7 @@ ${orderInstructions}
       await speakText(responseText);
 
       // Check if AI response indicates order is ready (for Gloria Foods integration)
-      if (kioskView === 'ORDER' && profile.integrations.gloriaFoods) {
+      if (kioskView === 'ORDER' && profile.integrations.gloriaFoodsOrders) {
         const orderReadyKeywords = ['prepared your order', 'checkout', 'complete payment', 'secure checkout link'];
         const isOrderReady = orderReadyKeywords.some(keyword => 
           responseText.toLowerCase().includes(keyword.toLowerCase())
@@ -828,7 +827,7 @@ ${orderInstructions}
 
   // Handle order completion - extract order details and call API
   const handleCompleteOrder = async () => {
-    if (!profile.integrations.gloriaFoods || kioskView !== 'ORDER') return;
+    if (!profile.integrations.gloriaFoodsOrders || kioskView !== 'ORDER') return;
     
     setIsPreparingOrder(true);
     
@@ -1237,55 +1236,64 @@ ${orderInstructions}
       </div>
 
       <div className="space-y-5">
-        {/* Gloria Foods Integration Card */}
-        <div className={`p-8 rounded-2xl border-2 transition-all ${profile.integrations.gloriaFoods ? 'border-orange-500 bg-orange-50/30' : 'border-slate-100 bg-white hover:border-orange-200 shadow-sm'}`}>
+        {/* Gloria Foods API Token Section */}
+        <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
+          <label className="block text-xs font-bold text-slate-500 mb-3 uppercase tracking-wide">
+            Gloria Foods API Token
+          </label>
+          <div className="flex gap-3">
+            <div className="relative flex-1">
+              <KeyRound className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+              <input 
+                type="password" 
+                placeholder="Enter Restaurant API Token" 
+                value={gloriaInput}
+                onChange={(e) => setGloriaInput(e.target.value)}
+                className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-lg text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500 transition"
+              />
+            </div>
+            <button 
+              onClick={connectGloriaFoods}
+              disabled={!gloriaInput || loading}
+              className="bg-orange-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-orange-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-orange-500/20"
+            >
+              {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Link2 className="w-5 h-5" />}
+              Save Token
+            </button>
+          </div>
+          <p className="text-xs text-slate-400 mt-3 flex items-center gap-2">
+            <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
+            Store your API token to enable Orders and Calendar integrations below.
+          </p>
+        </div>
+
+        {/* Gloria Foods Orders Integration Card */}
+        <div className={`p-8 rounded-2xl border-2 transition-all ${profile.integrations.gloriaFoodsOrders ? 'border-orange-500 bg-orange-50/30' : 'border-slate-100 bg-white hover:border-orange-200 shadow-sm'}`}>
           <div className="flex items-start justify-between mb-6">
              <div className="flex items-center gap-5">
                <div className="w-14 h-14 bg-orange-500 text-white rounded-xl flex items-center justify-center font-bold text-2xl shadow-orange-200 shadow-lg">GF</div>
                <div>
-                 <h4 className="font-bold text-slate-900 text-xl">Gloria Foods</h4>
-                 <p className="text-sm text-slate-500 mt-1">Reservations & Online Ordering API</p>
+                 <h4 className="font-bold text-slate-900 text-xl">Gloria Foods Orders</h4>
+                 <p className="text-sm text-slate-500 mt-1">Menu sync & Online Ordering API</p>
                </div>
              </div>
-             <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${profile.integrations.gloriaFoods ? 'bg-orange-500 border-orange-500' : 'border-slate-200'}`}>
-                {profile.integrations.gloriaFoods && <Check className="w-5 h-5 text-white" />}
+             <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${profile.integrations.gloriaFoodsOrders ? 'bg-orange-500 border-orange-500' : 'border-slate-200'}`}>
+                {profile.integrations.gloriaFoodsOrders && <Check className="w-5 h-5 text-white" />}
              </div>
           </div>
           
-          {!profile.integrations.gloriaFoods ? (
-            <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
-              <label className="block text-xs font-bold text-slate-500 mb-3 uppercase tracking-wide">
-                API Token
-              </label>
-              <div className="flex gap-3">
-                <div className="relative flex-1">
-                  <KeyRound className="w-5 h-5 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
-                  <input 
-                    type="password" 
-                    placeholder="Enter Restaurant API Token" 
-                    value={gloriaInput}
-                    onChange={(e) => setGloriaInput(e.target.value)}
-                    className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-lg text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-orange-500 transition"
-                  />
-                </div>
-                <button 
-                  onClick={connectGloriaFoods}
-                  disabled={!gloriaInput || loading}
-                  className="bg-orange-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-orange-700 disabled:opacity-50 flex items-center gap-2 shadow-lg shadow-orange-500/20"
-                >
-                  {loading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Link2 className="w-5 h-5" />}
-                  Connect
-                </button>
-              </div>
-              <p className="text-xs text-slate-400 mt-3 flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-slate-300"></span>
-                We'll sync menu availability and table inventory automatically.
-              </p>
-            </div>
+          {!profile.integrations.gloriaFoodsOrders ? (
+            <button 
+              onClick={() => setProfile(p => ({...p, integrations: {...p.integrations, gloriaFoodsOrders: true}}))}
+              className="bg-orange-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-orange-700 flex items-center gap-2 shadow-lg shadow-orange-500/20"
+            >
+              <Link2 className="w-5 h-5" />
+              Enable Orders Integration
+            </button>
           ) : (
              <div className="space-y-3">
                 <div className="text-sm text-green-700 font-medium flex items-center gap-2 bg-green-50 py-2 px-3 rounded-lg w-fit">
-                   <Check className="w-4 h-4" /> API Connected
+                   <Check className="w-4 h-4" /> Orders Enabled
                 </div>
                 <button
                    onClick={syncGloriaFoodsMenu}
@@ -1303,6 +1311,119 @@ ${orderInstructions}
                          Sync Menu from Gloria Foods
                       </>
                    )}
+                </button>
+                <button
+                   onClick={() => setProfile(p => ({...p, integrations: {...p.integrations, gloriaFoodsOrders: false}}))}
+                   className="text-sm text-slate-500 px-4 py-2 rounded-lg font-medium hover:text-slate-700"
+                >
+                   Disable Orders
+                </button>
+             </div>
+          )}
+        </div>
+
+        {/* Gloria Foods Calendar Integration Card */}
+        <div className={`p-8 rounded-2xl border-2 transition-all ${profile.integrations.gloriaFoodsCalendar ? 'border-orange-500 bg-orange-50/30' : 'border-slate-100 bg-white hover:border-orange-200 shadow-sm'}`}>
+          <div className="flex items-start justify-between mb-6">
+             <div className="flex items-center gap-5">
+               <div className="w-14 h-14 bg-orange-500 text-white rounded-xl flex items-center justify-center font-bold text-2xl shadow-orange-200 shadow-lg">GF</div>
+               <div>
+                 <h4 className="font-bold text-slate-900 text-xl">Gloria Foods Calendar</h4>
+                 <p className="text-sm text-slate-500 mt-1">Reservation sync & Table management</p>
+               </div>
+             </div>
+             <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${profile.integrations.gloriaFoodsCalendar ? 'bg-orange-500 border-orange-500' : 'border-slate-200'}`}>
+                {profile.integrations.gloriaFoodsCalendar && <Check className="w-5 h-5 text-white" />}
+             </div>
+          </div>
+          
+          {!profile.integrations.gloriaFoodsCalendar ? (
+            <button 
+              onClick={() => setProfile(p => ({...p, integrations: {...p.integrations, gloriaFoodsCalendar: true}}))}
+              className="bg-orange-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-orange-700 flex items-center gap-2 shadow-lg shadow-orange-500/20"
+            >
+              <Link2 className="w-5 h-5" />
+              Enable Calendar Integration
+            </button>
+          ) : (
+             <div className="space-y-3">
+                <div className="text-sm text-green-700 font-medium flex items-center gap-2 bg-green-50 py-2 px-3 rounded-lg w-fit">
+                   <Check className="w-4 h-4" /> Calendar Enabled
+                </div>
+                <button
+                   onClick={() => setProfile(p => ({...p, integrations: {...p.integrations, gloriaFoodsCalendar: false}}))}
+                   className="text-sm text-slate-500 px-4 py-2 rounded-lg font-medium hover:text-slate-700"
+                >
+                   Disable Calendar
+                </button>
+             </div>
+          )}
+        </div>
+
+        {/* Google Calendar Integration Card */}
+        <div className={`p-8 rounded-2xl border-2 transition-all ${profile.integrations.googleCalendar ? 'border-blue-500 bg-blue-50/30' : 'border-slate-100 bg-white hover:border-blue-200 shadow-sm'}`}>
+          <div className="flex items-start justify-between mb-6">
+             <div className="flex items-center gap-5">
+               <div className="w-14 h-14 bg-blue-500 text-white rounded-xl flex items-center justify-center font-bold text-2xl shadow-blue-200 shadow-lg">GC</div>
+               <div>
+                 <h4 className="font-bold text-slate-900 text-xl">Google Calendar</h4>
+                 <p className="text-sm text-slate-500 mt-1">Two-way sync with your calendar</p>
+               </div>
+             </div>
+             <div className={`w-8 h-8 rounded-full border-2 flex items-center justify-center transition-colors ${profile.integrations.googleCalendar ? 'bg-blue-500 border-blue-500' : 'border-slate-200'}`}>
+                {profile.integrations.googleCalendar && <Check className="w-5 h-5 text-white" />}
+             </div>
+          </div>
+          
+          {!profile.integrations.googleCalendar ? (
+            <button 
+              onClick={async () => {
+                try {
+                  const { data: { session } } = await supabase.auth.getSession();
+                  if (!session) {
+                    alert('Please log in to connect Google Calendar');
+                    return;
+                  }
+
+                  const user = await getCurrentUser();
+                  if (!user?.tenant_id) {
+                    alert('No tenant found');
+                    return;
+                  }
+
+                  // Build OAuth URL
+                  const googleClientId = import.meta.env.VITE_GOOGLE_CLIENT_ID || process.env.GOOGLE_CLIENT_ID;
+                  if (!googleClientId) {
+                    alert('Google Calendar integration not configured. Please set GOOGLE_CLIENT_ID.');
+                    return;
+                  }
+
+                  const redirectUri = `${window.location.origin}/api/google-calendar/auth`;
+                  const state = btoa(JSON.stringify({ tenant_id: user.tenant_id }));
+                  const scope = 'https://www.googleapis.com/auth/calendar';
+                  const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&state=${state}`;
+                  
+                  window.location.href = authUrl;
+                } catch (error: any) {
+                  console.error('Error initiating Google Calendar OAuth:', error);
+                  alert('Failed to connect Google Calendar: ' + error.message);
+                }
+              }}
+              className="bg-blue-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-blue-700 flex items-center gap-2 shadow-lg shadow-blue-500/20"
+            >
+              <Link2 className="w-5 h-5" />
+              Connect Google Calendar
+            </button>
+          ) : (
+             <div className="space-y-3">
+                <div className="text-sm text-green-700 font-medium flex items-center gap-2 bg-green-50 py-2 px-3 rounded-lg w-fit">
+                   <Check className="w-4 h-4" /> Calendar Connected
+                </div>
+                <button
+                   onClick={() => setProfile(p => ({...p, integrations: {...p.integrations, googleCalendar: false}}))}
+                   className="text-sm text-slate-500 px-4 py-2 rounded-lg font-medium hover:text-slate-700"
+                >
+                   Disconnect
                 </button>
              </div>
           )}
@@ -1388,7 +1509,7 @@ ${orderInstructions}
                     onChange={(e) => setProfile(p => ({...p, bookingPreference: e.target.value as any}))}
                     className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-900 font-medium"
                    >
-                     <option value="GLORIA_FOODS" disabled={!profile.integrations.gloriaFoods}>Use Gloria Foods API {profile.integrations.gloriaFoods ? '(Connected)' : '(Not Connected)'}</option>
+                     <option value="GLORIA_FOODS" disabled={!profile.integrations.gloriaFoodsCalendar}>Use Gloria Foods API {profile.integrations.gloriaFoodsCalendar ? '(Connected)' : '(Not Connected)'}</option>
                      <option value="HUMAN_SUPPORT">Route to Human Phone</option>
                      <option value="CUSTOM">Custom Booking URL</option>
                    </select>
@@ -2612,7 +2733,7 @@ ${orderInstructions}
                                  <ExternalLink className="w-4 h-4" />
                                  Complete Payment
                               </a>
-                           ) : profile.integrations.gloriaFoods ? (
+                           ) : profile.integrations.gloriaFoodsOrders ? (
                               <button 
                                  onClick={handleCompleteOrder}
                                  disabled={isPreparingOrder}

@@ -17,7 +17,9 @@ export interface BusinessInfo {
 
 export interface IntegrationStatus {
   googleBusiness: boolean;
-  gloriaFoods: boolean;
+  gloriaFoodsOrders: boolean;      // NEW: For menu/orders
+  gloriaFoodsCalendar: boolean;    // NEW: For reservations
+  googleCalendar: boolean;          // NEW: For calendar sync
   twilio: boolean;
 }
 

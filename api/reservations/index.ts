@@ -163,6 +163,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         });
       }
 
+      // Sync to Google Calendar if enabled
+      try {
+        const { data: restaurantProfile } = await supabase
+          .from('restaurants')
+          .select('profile_data')
+          .eq('id', restaurant_id)
+          .single();
+
+        const profileData = (restaurantProfile?.profile_data as any) || {};
+        if (profileData.integrations?.googleCalendar) {
+          const { syncReservationToGoogleCalendar } = await import('../../../lib/calendarSync');
+          await syncReservationToGoogleCalendar(reservation.id, restaurant_id, tenantId);
+        }
+      } catch (syncError) {
+        console.error('Error syncing to Google Calendar:', syncError);
+        // Don't fail the request if sync fails - it will be queued for retry
+      }
+
       return res.status(201).json(reservation as Reservation);
 
     } catch (error: any) {
