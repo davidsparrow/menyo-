@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { Reservation } from '../../../types';
+import type { Reservation } from '../../../types';
 
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -173,7 +173,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const profileData = (restaurantProfile?.profile_data as any) || {};
         if (profileData.integrations?.googleCalendar) {
-          const { syncReservationToGoogleCalendar } = await import('../../../lib/calendarSync.js');
+          const { syncReservationToGoogleCalendar } = await import('../../../lib/calendarSync');
           await syncReservationToGoogleCalendar(reservation.id, restaurant_id, tenantId);
         }
       } catch (syncError) {
