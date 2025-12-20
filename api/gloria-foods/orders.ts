@@ -73,10 +73,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === 'POST') {
     try {
+      // Check if Orders integration is enabled
+      const { data: restaurantData } = await supabase
+        .from('restaurants')
+        .select('profile_data')
+        .eq('tenant_id', tenantId)
+        .single();
+
+      const profileData = (restaurantData?.profile_data as any) || {};
+      if (!profileData.integrations?.gloriaFoodsOrders) {
+        return res.status(404).json({ error: 'Gloria Foods Orders integration not enabled. Please enable it in Settings.' });
+      }
+
       // Get Gloria Foods token
       const gloriaToken = await getGloriaFoodsToken(tenantId!);
       if (!gloriaToken) {
-        return res.status(404).json({ error: 'Gloria Foods not connected. Please connect your Gloria Foods account in Settings.' });
+        return res.status(404).json({ error: 'Gloria Foods API token not found. Please add your API token in Settings.' });
       }
 
       // Validate request body

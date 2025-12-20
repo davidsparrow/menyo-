@@ -1,52 +1,19 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import crypto from 'crypto';
-import { GoogleCalendarService } from '../../../services/googleCalendarService.js';
+import { handleCalendarWebhook } from '../../../lib/calendarSync';
+import { triggerWebhookSubscriptions } from '../../../lib/webhookTriggers';
 
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
-const encryptionKey = process.env.ENCRYPTION_KEY || 'default-key-change-in-production';
-const googleClientId = process.env.GOOGLE_CLIENT_ID!;
-const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET!;
 
-function decrypt(encrypted: string): string {
-  const parts = encrypted.split(':');
-  const iv = Buffer.from(parts[0], 'hex');
-  const encryptedText = parts[1];
-  const decipher = crypto.createDecipheriv('aes-256-cbc', Buffer.from(encryptionKey.padEnd(32).slice(0, 32)), iv);
-  let decrypted = decipher.update(encryptedText, 'hex', 'utf8');
-  decrypted += decipher.final('utf8');
-  return decrypted;
-}
-
-async function getGoogleCalendarTokens(tenantId: string): Promise<{ accessToken: string; refreshToken: string } | null> {
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
-  
-  const { data, error } = await supabase
-    .from('api_keys')
-    .select('encrypted_key')
-    .eq('tenant_id', tenantId)
-    .eq('key_type', 'google_calendar')
-    .single();
-
-  if (error || !data) {
-    return null;
-  }
-
-  try {
-    const refreshToken = decrypt(data.encrypted_key);
-    const service = new GoogleCalendarService('', refreshToken, googleClientId, googleClientSecret);
-    const accessToken = await service.refreshAccessToken();
-    return { accessToken, refreshToken };
-  } catch (err) {
-    console.error('Error getting Google Calendar tokens:', err);
-    return null;
-  }
-}
+const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
 /**
- * Webhook endpoint to receive push notifications from Google Calendar
- * Validates security token and processes event changes
+ * Webhook endpoint to receive Google Calendar push notifications
+ * POST /api/google-calendar/webhook
+ * 
+ * Google sends notifications when calendar events change.
+ * We validate the token, then fetch event details and sync to our database.
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== 'POST') {
@@ -54,125 +21,74 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    // Validate security token
+    // Extract channel token from header (Google sends this)
     const channelToken = req.headers['x-goog-channel-token'] as string;
-    if (!channelToken) {
-      return res.status(401).json({ error: 'Missing channel token' });
+    const resourceId = req.body?.resourceId || req.body?.resourceState;
+
+    if (!channelToken || !resourceId) {
+      console.warn('Missing channel token or resource ID in webhook');
+      return res.status(400).json({ error: 'Missing required headers or body' });
     }
 
-    // Extract resourceId from notification
-    const { resourceId, resourceState, resourceUri } = req.body;
-    
-    if (!resourceId) {
-      return res.status(400).json({ error: 'Missing resourceId in notification' });
-    }
-
-    const supabase = createClient(supabaseUrl, supabaseServiceKey);
-
-    // Look up watch record by resource_id
+    // Find watch record by resource_id
     const { data: watch, error: watchError } = await supabase
       .from('google_calendar_watches')
-      .select('*, restaurant_id, tenant_id, calendar_id')
+      .select('*')
       .eq('resource_id', resourceId)
       .single();
 
     if (watchError || !watch) {
-      console.warn(`Watch not found for resourceId: ${resourceId}`);
-      // Return 200 to acknowledge receipt (don't want Google to retry)
+      console.warn(`Watch not found for resource_id: ${resourceId}`);
+      // Still return 200 to acknowledge receipt (Google will retry if we return error)
       return res.status(200).json({ received: true, message: 'Watch not found' });
     }
 
     // Validate token
     if (watch.channel_token !== channelToken) {
-      console.warn(`Invalid channel token for resourceId: ${resourceId}`);
+      console.warn(`Invalid channel token for resource_id: ${resourceId}`);
       return res.status(401).json({ error: 'Invalid channel token' });
     }
 
-    // Handle sync notification
-    if (resourceState === 'sync') {
-      // Initial sync notification - fetch all events
-      // This is handled separately, just acknowledge
-      return res.status(200).json({ received: true, state: 'sync' });
+    // Check if watch is expired
+    if (new Date(watch.expiration) < new Date()) {
+      console.warn(`Watch expired for resource_id: ${resourceId}`);
+      return res.status(200).json({ received: true, message: 'Watch expired' });
     }
 
-    if (resourceState === 'exists') {
-      // Event was created or updated - fetch event details
-      try {
-        const tokens = await getGoogleCalendarTokens(watch.tenant_id);
-        if (!tokens) {
-          console.error('No tokens found for tenant:', watch.tenant_id);
-          // Queue for retry
-          await queueSyncOperation(watch.restaurant_id, watch.tenant_id, 'sync_from_google', {
-            calendar_id: watch.calendar_id,
-            resource_uri: resourceUri,
-          });
-          return res.status(200).json({ received: true, queued: true });
-        }
+    // Handle the webhook notification
+    await handleCalendarWebhook(
+      resourceId,
+      channelToken,
+      watch.restaurant_id,
+      watch.tenant_id
+    );
 
-        const service = new GoogleCalendarService(tokens.accessToken, tokens.refreshToken, googleClientId, googleClientSecret);
-        
-        // Extract event ID from resourceUri
-        const eventIdMatch = resourceUri?.match(/\/events\/([^?]+)/);
-        if (!eventIdMatch) {
-          return res.status(400).json({ error: 'Could not extract event ID from resourceUri' });
-        }
-
-        const eventId = eventIdMatch[1];
-        const event = await service.getEvent(watch.calendar_id, eventId);
-
-        // Import calendarSync function (will be created next)
-        const { syncGoogleEventToReservation } = await import('../../../lib/calendarSync.js');
-        await syncGoogleEventToReservation(event, watch.restaurant_id, watch.tenant_id, watch.calendar_id);
-
-        return res.status(200).json({ received: true, processed: true });
-      } catch (error: any) {
-        console.error('Error processing webhook:', error);
-        // Queue for retry
-        await queueSyncOperation(watch.restaurant_id, watch.tenant_id, 'sync_from_google', {
-          calendar_id: watch.calendar_id,
-          resource_uri: resourceUri,
-        });
-        return res.status(200).json({ received: true, queued: true });
-      }
+    // Trigger Make.com/n8n webhooks if configured
+    try {
+      await triggerWebhookSubscriptions(
+        watch.restaurant_id,
+        watch.tenant_id,
+        'reservation.updated', // Google Calendar change triggers update
+        { source: 'google_calendar', resource_id: resourceId }
+      );
+    } catch (webhookError) {
+      console.error('Error triggering webhook subscriptions:', webhookError);
+      // Don't fail the request if webhook triggers fail
     }
 
-    if (resourceState === 'not_exists') {
-      // Event was deleted
-      // We'll handle this by checking if reservation exists and marking as cancelled
-      // For now, just acknowledge
-      return res.status(200).json({ received: true, state: 'deleted' });
-    }
-
-    return res.status(200).json({ received: true });
+    return res.status(200).json({ 
+      received: true,
+      message: 'Webhook processed successfully',
+      resource_id: resourceId,
+    });
   } catch (error: any) {
     console.error('Error processing Google Calendar webhook:', error);
-    // Always return 200 to acknowledge receipt (don't want Google to retry)
-    return res.status(200).json({ received: true, error: error.message });
-  }
-}
-
-/**
- * Queue a sync operation for retry
- */
-async function queueSyncOperation(
-  restaurantId: string,
-  tenantId: string,
-  operationType: string,
-  payload: any
-): Promise<void> {
-  const supabase = createClient(supabaseUrl, supabaseServiceKey);
-  
-  // Calculate next retry with exponential backoff (1 minute initially)
-  const nextRetryAt = new Date(Date.now() + 60 * 1000);
-
-  await supabase
-    .from('sync_queue')
-    .insert({
-      restaurant_id: restaurantId,
-      tenant_id: tenantId,
-      operation_type: operationType,
-      payload,
-      next_retry_at: nextRetryAt.toISOString(),
-      status: 'PENDING',
+    // Return 200 to acknowledge receipt (Google will retry on 5xx)
+    // But log the error for debugging
+    return res.status(200).json({ 
+      received: true,
+      error: 'Processing failed, will retry',
+      message: error.message,
     });
+  }
 }

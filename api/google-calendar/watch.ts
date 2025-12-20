@@ -1,13 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
-import { GoogleCalendarService } from '../../../services/googleCalendarService.js';
+import { GoogleCalendarService } from '../../../services/googleCalendarService';
 
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const encryptionKey = process.env.ENCRYPTION_KEY || 'default-key-change-in-production';
-const googleClientId = process.env.GOOGLE_CLIENT_ID!;
-const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET!;
 
 function decrypt(encrypted: string): string {
   const parts = encrypted.split(':');
@@ -19,8 +17,8 @@ function decrypt(encrypted: string): string {
   return decrypted;
 }
 
-function generateRandomToken(length: number = 32): string {
-  return crypto.randomBytes(length).toString('hex');
+function generateChannelToken(): string {
+  return crypto.randomBytes(32).toString('hex');
 }
 
 async function getGoogleCalendarTokens(tenantId: string): Promise<{ accessToken: string; refreshToken: string } | null> {
@@ -38,18 +36,22 @@ async function getGoogleCalendarTokens(tenantId: string): Promise<{ accessToken:
   }
 
   try {
-    const refreshToken = decrypt(data.encrypted_key);
-    const service = new GoogleCalendarService('', refreshToken, googleClientId, googleClientSecret);
-    const accessToken = await service.refreshAccessToken();
-    return { accessToken, refreshToken };
+    const decrypted = decrypt(data.encrypted_key);
+    const tokens = JSON.parse(decrypted);
+    return {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+    };
   } catch (err) {
-    console.error('Error getting Google Calendar tokens:', err);
+    console.error('Error decrypting Google Calendar tokens:', err);
     return null;
   }
 }
 
 /**
- * Set up or stop watch channels for push notifications
+ * Set up or stop watch channels for Google Calendar push notifications
+ * POST /api/google-calendar/watch - Create watch channel
+ * DELETE /api/google-calendar/watch - Stop watch channel
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const authHeader = req.headers.authorization;
@@ -80,125 +82,152 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(403).json({ error: 'No tenant associated' });
   }
 
-  // Get restaurant and calendar ID
-  const { data: restaurant } = await supabase
-    .from('restaurants')
-    .select('id, profile_data')
-    .eq('tenant_id', tenantId)
-    .single();
-
-  if (!restaurant) {
-    return res.status(404).json({ error: 'Restaurant not found' });
-  }
-
-  const profileData = (restaurant.profile_data as any) || {};
-  const calendarId = profileData.googleCalendarId || 'primary';
-
-  const tokens = await getGoogleCalendarTokens(tenantId!);
-  if (!tokens) {
-    return res.status(404).json({ error: 'Google Calendar not connected' });
-  }
-
-  const service = new GoogleCalendarService(tokens.accessToken, tokens.refreshToken, googleClientId, googleClientSecret);
-
   if (req.method === 'POST') {
-    // Create watch channel
     try {
-      const webhookUrl = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}/api/google-calendar/webhook`;
-      const channelId = `menyo-${restaurant.id}-${Date.now()}`;
-      const channelToken = generateRandomToken(32);
-      const expiration = Date.now() + (7 * 24 * 60 * 60 * 1000); // 7 days from now
+      const { restaurant_id, calendar_id } = req.body;
 
-      const watchRequest = {
+      if (!restaurant_id || !calendar_id) {
+        return res.status(400).json({ error: 'restaurant_id and calendar_id are required' });
+      }
+
+      // Get tokens
+      const tokens = await getGoogleCalendarTokens(tenantId!);
+      if (!tokens) {
+        return res.status(404).json({ error: 'Google Calendar not connected' });
+      }
+
+      // Check if watch already exists
+      const { data: existingWatch } = await supabase
+        .from('google_calendar_watches')
+        .select('*')
+        .eq('restaurant_id', restaurant_id)
+        .eq('calendar_id', calendar_id)
+        .single();
+
+      // If exists and not expired, return existing
+      if (existingWatch && new Date(existingWatch.expiration) > new Date()) {
+        return res.status(200).json({
+          success: true,
+          watch: existingWatch,
+          message: 'Watch channel already exists',
+        });
+      }
+
+      // Stop existing watch if expired
+      if (existingWatch) {
+        const calendarService = new GoogleCalendarService(tokens.accessToken, tokens.refreshToken);
+        try {
+          await calendarService.stopWatch(existingWatch.channel_id, existingWatch.resource_id || '');
+        } catch (err) {
+          console.warn('Error stopping expired watch:', err);
+        }
+      }
+
+      // Generate channel ID and token
+      const channelId = `menyo_${restaurant_id}_${Date.now()}`;
+      const channelToken = generateChannelToken();
+
+      // Calculate expiration (max 7 days = 604800 seconds)
+      const expirationSeconds = 604800; // 7 days
+      const expiration = new Date(Date.now() + expirationSeconds * 1000);
+
+      // Webhook URL (use request origin)
+      const webhookUrl = `${req.headers['x-forwarded-proto'] || 'https'}://${req.headers.host}/api/google-calendar/webhook`;
+
+      // Create watch channel
+      const calendarService = new GoogleCalendarService(tokens.accessToken, tokens.refreshToken);
+      const watchResponse = await calendarService.watchEvents(calendar_id, {
         id: channelId,
-        type: 'web_hook' as const,
+        type: 'web_hook',
         address: webhookUrl,
         token: channelToken,
-        expiration: expiration,
-      };
-
-      const watchChannel = await service.watchEvents(calendarId, watchRequest);
+        expiration: expiration.getTime(),
+      });
 
       // Store watch in database
-      const { error: insertError } = await supabase
+      const { data: watch, error: insertError } = await supabase
         .from('google_calendar_watches')
-        .insert({
-          restaurant_id: restaurant.id,
+        .upsert({
+          restaurant_id,
           tenant_id: tenantId,
-          calendar_id: calendarId,
+          calendar_id,
           channel_id: channelId,
-          resource_id: watchChannel.resourceId,
+          resource_id: watchResponse.resourceId,
           channel_token: channelToken,
-          expiration: new Date(watchChannel.expiration).toISOString(),
-        });
+          expiration: expiration.toISOString(),
+          updated_at: new Date().toISOString(),
+        }, {
+          onConflict: 'restaurant_id,calendar_id',
+        })
+        .select()
+        .single();
 
       if (insertError) {
-        console.error('Error storing watch:', insertError);
-        // Try to stop the watch we just created
-        try {
-          await service.stopWatch(channelId, watchChannel.resourceId);
-        } catch (stopError) {
-          console.error('Error stopping watch after failed insert:', stopError);
-        }
-        return res.status(500).json({ error: 'Failed to store watch channel' });
+        throw new Error(`Failed to store watch: ${insertError.message}`);
       }
 
       return res.status(200).json({
         success: true,
-        channel_id: channelId,
-        resource_id: watchChannel.resourceId,
-        expiration: watchChannel.expiration,
+        watch: {
+          channel_id: channelId,
+          resource_id: watchResponse.resourceId,
+          expiration: expiration.toISOString(),
+        },
+        message: 'Watch channel created successfully',
       });
     } catch (error: any) {
       console.error('Error creating watch:', error);
-      return res.status(500).json({ error: error.message || 'Failed to create watch channel' });
+      return res.status(500).json({ 
+        error: error.message || 'Failed to create watch channel' 
+      });
     }
   }
 
   if (req.method === 'DELETE') {
-    // Stop watch channel
     try {
-      const { channel_id } = req.query;
-      if (!channel_id || typeof channel_id !== 'string') {
-        return res.status(400).json({ error: 'channel_id query parameter is required' });
+      const { restaurant_id, calendar_id } = req.query;
+
+      if (!restaurant_id || !calendar_id) {
+        return res.status(400).json({ error: 'restaurant_id and calendar_id are required' });
       }
 
-      // Get watch from database
+      // Get watch record
       const { data: watch } = await supabase
         .from('google_calendar_watches')
         .select('*')
-        .eq('channel_id', channel_id)
-        .eq('restaurant_id', restaurant.id)
+        .eq('restaurant_id', restaurant_id)
+        .eq('calendar_id', calendar_id)
         .single();
 
       if (!watch) {
-        return res.status(404).json({ error: 'Watch not found' });
+        return res.status(404).json({ error: 'Watch channel not found' });
       }
 
-      // Stop watch via Google API
-      if (watch.resource_id) {
-        try {
-          await service.stopWatch(watch.channel_id, watch.resource_id);
-        } catch (stopError) {
-          // Continue even if stop fails (watch may already be expired)
-          console.warn('Error stopping watch via API:', stopError);
-        }
+      // Get tokens
+      const tokens = await getGoogleCalendarTokens(tenantId!);
+      if (!tokens) {
+        return res.status(404).json({ error: 'Google Calendar not connected' });
       }
+
+      // Stop watch
+      const calendarService = new GoogleCalendarService(tokens.accessToken, tokens.refreshToken);
+      await calendarService.stopWatch(watch.channel_id, watch.resource_id || '');
 
       // Delete from database
-      const { error: deleteError } = await supabase
+      await supabase
         .from('google_calendar_watches')
         .delete()
         .eq('id', watch.id);
 
-      if (deleteError) {
-        return res.status(500).json({ error: 'Failed to delete watch from database' });
-      }
-
-      return res.status(200).json({ success: true });
+      return res.status(200).json({
+        success: true,
+        message: 'Watch channel stopped successfully',
+      });
     } catch (error: any) {
       console.error('Error stopping watch:', error);
-      return res.status(500).json({ error: error.message || 'Failed to stop watch channel' });
+      return res.status(500).json({ 
+        error: error.message || 'Failed to stop watch channel' 
+      });
     }
   }
 

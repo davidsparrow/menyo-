@@ -152,6 +152,42 @@ function App() {
   // API Key State
   const [tenantApiKey, setTenantApiKey] = useState<string | null>(null);
 
+  // Save profile to database
+  const saveProfile = async (updatedProfile: RestaurantProfile) => {
+    try {
+      const user = await getCurrentUser();
+      if (!user) return;
+
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session) return;
+
+      // Get restaurant ID
+      const { data: restaurant } = await supabase
+        .from('restaurants')
+        .select('id')
+        .eq('user_id', user.id)
+        .single();
+
+      if (restaurant) {
+        // Save to restaurants table
+        const response = await fetch(`/api/restaurants/${restaurant.id}`, {
+          method: 'PUT',
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ profile_data: updatedProfile }),
+        });
+
+        if (!response.ok) {
+          console.error('Failed to save profile');
+        }
+      }
+    } catch (error) {
+      console.error('Error saving profile:', error);
+    }
+  };
+
   // Load tenant API key and profile on mount
   useEffect(() => {
     const loadUserData = async () => {
@@ -165,15 +201,15 @@ function App() {
         const { data: { session } } = await supabase.auth.getSession();
         if (session) {
           try {
-            // Try to get restaurant profile from user_profiles
-            const { data: profileData } = await supabase
-              .from('user_profiles')
+            // Get restaurant profile from restaurants table
+            const { data: restaurant } = await supabase
+              .from('restaurants')
               .select('profile_data')
               .eq('user_id', user.id)
               .single();
             
-            if (profileData?.profile_data) {
-              setProfile(profileData.profile_data as RestaurantProfile);
+            if (restaurant?.profile_data) {
+              setProfile(restaurant.profile_data as RestaurantProfile);
             }
           } catch (error) {
             console.error('Error loading profile:', error);
@@ -182,7 +218,28 @@ function App() {
       }
     };
     loadUserData();
+
+    // Check for OAuth redirect
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('google_calendar_connected') === 'true') {
+      // Reload profile to get updated integration status
+      setTimeout(() => {
+        loadUserData();
+        // Clean up URL
+        window.history.replaceState({}, '', window.location.pathname);
+      }, 1000);
+    }
   }, []);
+
+  // Auto-save profile when integrations change
+  useEffect(() => {
+    // Debounce saves to avoid too many API calls
+    const timeoutId = setTimeout(() => {
+      saveProfile(profile);
+    }, 1000);
+
+    return () => clearTimeout(timeoutId);
+  }, [profile.integrations]);
 
   // --- Handlers ---
 
@@ -1284,7 +1341,13 @@ ${orderInstructions}
           
           {!profile.integrations.gloriaFoodsOrders ? (
             <button 
-              onClick={() => setProfile(p => ({...p, integrations: {...p.integrations, gloriaFoodsOrders: true}}))}
+              onClick={async () => {
+                const updated = {...profile, integrations: {...profile.integrations, gloriaFoodsOrders: true}};
+                setProfile(updated);
+                await saveProfile(updated);
+                // Auto-sync menu when enabling orders
+                await syncGloriaFoodsMenu();
+              }}
               className="bg-orange-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-orange-700 flex items-center gap-2 shadow-lg shadow-orange-500/20"
             >
               <Link2 className="w-5 h-5" />
@@ -1313,7 +1376,11 @@ ${orderInstructions}
                    )}
                 </button>
                 <button
-                   onClick={() => setProfile(p => ({...p, integrations: {...p.integrations, gloriaFoodsOrders: false}}))}
+                   onClick={async () => {
+                     const updated = {...profile, integrations: {...profile.integrations, gloriaFoodsOrders: false}};
+                     setProfile(updated);
+                     await saveProfile(updated);
+                   }}
                    className="text-sm text-slate-500 px-4 py-2 rounded-lg font-medium hover:text-slate-700"
                 >
                    Disable Orders
@@ -1339,7 +1406,11 @@ ${orderInstructions}
           
           {!profile.integrations.gloriaFoodsCalendar ? (
             <button 
-              onClick={() => setProfile(p => ({...p, integrations: {...p.integrations, gloriaFoodsCalendar: true}}))}
+              onClick={async () => {
+                const updated = {...profile, integrations: {...profile.integrations, gloriaFoodsCalendar: true}};
+                setProfile(updated);
+                await saveProfile(updated);
+              }}
               className="bg-orange-600 text-white px-6 py-3 rounded-lg font-bold hover:bg-orange-700 flex items-center gap-2 shadow-lg shadow-orange-500/20"
             >
               <Link2 className="w-5 h-5" />
@@ -1351,7 +1422,11 @@ ${orderInstructions}
                    <Check className="w-4 h-4" /> Calendar Enabled
                 </div>
                 <button
-                   onClick={() => setProfile(p => ({...p, integrations: {...p.integrations, gloriaFoodsCalendar: false}}))}
+                   onClick={async () => {
+                     const updated = {...profile, integrations: {...profile.integrations, gloriaFoodsCalendar: false}};
+                     setProfile(updated);
+                     await saveProfile(updated);
+                   }}
                    className="text-sm text-slate-500 px-4 py-2 rounded-lg font-medium hover:text-slate-700"
                 >
                    Disable Calendar
@@ -1400,7 +1475,7 @@ ${orderInstructions}
 
                   const redirectUri = `${window.location.origin}/api/google-calendar/auth`;
                   const state = btoa(JSON.stringify({ tenant_id: user.tenant_id }));
-                  const scope = 'https://www.googleapis.com/auth/calendar';
+                  const scope = 'https://www.googleapis.com/auth/calendar https://www.googleapis.com/auth/calendar.events';
                   const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${googleClientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent&state=${state}`;
                   
                   window.location.href = authUrl;
@@ -1420,7 +1495,12 @@ ${orderInstructions}
                    <Check className="w-4 h-4" /> Calendar Connected
                 </div>
                 <button
-                   onClick={() => setProfile(p => ({...p, integrations: {...p.integrations, googleCalendar: false}}))}
+                   onClick={async () => {
+                     // TODO: Stop watch channels and revoke tokens
+                     const updated = {...profile, integrations: {...profile.integrations, googleCalendar: false}};
+                     setProfile(updated);
+                     await saveProfile(updated);
+                   }}
                    className="text-sm text-slate-500 px-4 py-2 rounded-lg font-medium hover:text-slate-700"
                 >
                    Disconnect

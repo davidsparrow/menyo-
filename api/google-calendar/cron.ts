@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { GoogleCalendarService } from '../../../services/googleCalendarService.js';
-import { syncGoogleEventToReservation, syncReservationToGoogleCalendar, deleteGoogleCalendarEvent } from '../../../lib/calendarSync.js';
+import { GoogleCalendarService } from '../../../services/googleCalendarService';
+import { syncGoogleEventToReservation, syncReservationToGoogleCalendar, deleteGoogleCalendarEvent } from '../../../lib/calendarSync';
 import crypto from 'crypto';
 
 const supabaseUrl = process.env.SUPABASE_URL!;

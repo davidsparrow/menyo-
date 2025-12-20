@@ -1,13 +1,11 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 import crypto from 'crypto';
-import { GoogleCalendarService } from '../../../services/googleCalendarService.js';
+import { GoogleCalendarService } from '../../../services/googleCalendarService';
 
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 const encryptionKey = process.env.ENCRYPTION_KEY || 'default-key-change-in-production';
-const googleClientId = process.env.GOOGLE_CLIENT_ID!;
-const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET!;
 
 function decrypt(encrypted: string): string {
   const parts = encrypted.split(':');
@@ -34,20 +32,22 @@ async function getGoogleCalendarTokens(tenantId: string): Promise<{ accessToken:
   }
 
   try {
-    const refreshToken = decrypt(data.encrypted_key);
-    // Get access token by refreshing
-    const service = new GoogleCalendarService('', refreshToken, googleClientId, googleClientSecret);
-    const accessToken = await service.refreshAccessToken();
-    return { accessToken, refreshToken };
+    const decrypted = decrypt(data.encrypted_key);
+    const tokens = JSON.parse(decrypted);
+    return {
+      accessToken: tokens.access_token,
+      refreshToken: tokens.refresh_token,
+    };
   } catch (err) {
-    console.error('Error getting Google Calendar tokens:', err);
+    console.error('Error decrypting Google Calendar tokens:', err);
     return null;
   }
 }
 
 /**
- * List user's calendars
- * GET /api/google-calendar/calendars
+ * List calendars and select calendar
+ * GET /api/google-calendar/calendars - List calendars
+ * POST /api/google-calendar/calendars - Select calendar (store calendar_id in profile)
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const authHeader = req.headers.authorization;
@@ -80,32 +80,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (req.method === 'GET') {
     try {
+      // Get tokens
       const tokens = await getGoogleCalendarTokens(tenantId!);
       if (!tokens) {
-        return res.status(404).json({ error: 'Google Calendar not connected. Please connect your Google Calendar account.' });
+        return res.status(404).json({ error: 'Google Calendar not connected' });
       }
 
-      const service = new GoogleCalendarService(tokens.accessToken, tokens.refreshToken, googleClientId, googleClientSecret);
-      const calendars = await service.getCalendars();
+      // Create service
+      const calendarService = new GoogleCalendarService(tokens.accessToken, tokens.refreshToken);
+      
+      // List calendars
+      const calendars = await calendarService.getCalendars();
 
       return res.status(200).json({ calendars });
     } catch (error: any) {
-      console.error('Error fetching calendars:', error);
+      console.error('Error listing calendars:', error);
       return res.status(500).json({ 
-        error: error.message || 'Failed to fetch calendars' 
+        error: error.message || 'Failed to list calendars' 
       });
     }
   }
 
   if (req.method === 'POST') {
-    // Store selected calendar ID in restaurant profile
     try {
       const { calendar_id } = req.body;
+
       if (!calendar_id) {
         return res.status(400).json({ error: 'calendar_id is required' });
       }
 
-      // Get restaurant for this tenant
+      // Get restaurant
       const { data: restaurant } = await supabase
         .from('restaurants')
         .select('id, profile_data')
@@ -116,24 +120,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(404).json({ error: 'Restaurant not found' });
       }
 
-      // Update profile_data with selected calendar
+      // Update profile with selected calendar
       const profileData = (restaurant.profile_data as any) || {};
       profileData.googleCalendarId = calendar_id;
 
-      const { error: updateError } = await supabase
+      await supabase
         .from('restaurants')
         .update({ profile_data: profileData })
         .eq('id', restaurant.id);
 
-      if (updateError) {
-        return res.status(500).json({ error: 'Failed to save calendar selection' });
-      }
-
-      return res.status(200).json({ success: true, calendar_id });
+      return res.status(200).json({ 
+        success: true,
+        calendar_id,
+        message: 'Calendar selected successfully' 
+      });
     } catch (error: any) {
-      console.error('Error saving calendar selection:', error);
+      console.error('Error selecting calendar:', error);
       return res.status(500).json({ 
-        error: error.message || 'Failed to save calendar selection' 
+        error: error.message || 'Failed to select calendar' 
       });
     }
   }

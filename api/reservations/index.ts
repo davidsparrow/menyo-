@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js';
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import type { Reservation } from '../../../types.js';
+import type { Reservation } from '../../../types';
 
 const supabaseUrl = process.env.SUPABASE_URL!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
@@ -173,18 +173,127 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
         const profileData = (restaurantProfile?.profile_data as any) || {};
         if (profileData.integrations?.googleCalendar) {
-          const { syncReservationToGoogleCalendar } = await import('../../../lib/calendarSync.js');
-          await syncReservationToGoogleCalendar(reservation.id, restaurant_id, tenantId);
+          const { syncReservationToGoogleCalendar } = await import('../../../lib/calendarSync');
+          const eventId = await syncReservationToGoogleCalendar(reservation.id, restaurant_id, tenantId);
+          
+          // Update reservation with event ID if sync succeeded
+          if (eventId) {
+            await supabase
+              .from('reservations')
+              .update({ google_calendar_event_id: eventId })
+              .eq('id', reservation.id);
+          }
         }
       } catch (syncError) {
         console.error('Error syncing to Google Calendar:', syncError);
         // Don't fail the request if sync fails - it will be queued for retry
       }
 
+      // Trigger webhook subscriptions for Make.com/n8n
+      try {
+        const { triggerWebhookSubscriptions } = await import('../../../lib/webhookTriggers');
+        await triggerWebhookSubscriptions(
+          restaurant_id,
+          tenantId,
+          'reservation.created',
+          { reservation_id: reservation.id }
+        );
+      } catch (webhookError) {
+        console.error('Error triggering webhooks:', webhookError);
+        // Don't fail the request if webhooks fail
+      }
+
       return res.status(201).json(reservation as Reservation);
 
     } catch (error: any) {
       console.error('Error in reservation creation:', error);
+      return res.status(500).json({
+        error: 'Internal server error',
+        message: error.message,
+      });
+    }
+  }
+
+  if (req.method === 'PUT') {
+    try {
+      const { reservation_id } = req.query;
+      const updates = req.body;
+
+      if (!reservation_id) {
+        return res.status(400).json({ error: 'reservation_id is required' });
+      }
+
+      // Get existing reservation
+      const { data: existingReservation, error: fetchError } = await supabase
+        .from('reservations')
+        .select('*')
+        .eq('id', reservation_id)
+        .single();
+
+      if (fetchError || !existingReservation) {
+        return res.status(404).json({ error: 'Reservation not found' });
+      }
+
+      // Verify access
+      if (existingReservation.tenant_id !== tenantId && userData.role !== 'super-admin') {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      // Update reservation
+      const { data: updatedReservation, error: updateError } = await supabase
+        .from('reservations')
+        .update({
+          ...updates,
+          updated_at: new Date().toISOString(),
+        })
+        .eq('id', reservation_id)
+        .select()
+        .single();
+
+      if (updateError) {
+        return res.status(500).json({
+          error: 'Failed to update reservation',
+          details: updateError.message,
+        });
+      }
+
+      // Sync to Google Calendar if enabled and event exists
+      try {
+        const { data: restaurantProfile } = await supabase
+          .from('restaurants')
+          .select('profile_data')
+          .eq('id', existingReservation.restaurant_id)
+          .single();
+
+        const profileData = (restaurantProfile?.profile_data as any) || {};
+        if (profileData.integrations?.googleCalendar && updatedReservation.google_calendar_event_id) {
+          const { syncReservationToGoogleCalendar } = await import('../../../lib/calendarSync');
+          await syncReservationToGoogleCalendar(
+            reservation_id as string,
+            existingReservation.restaurant_id,
+            tenantId
+          );
+        }
+      } catch (syncError) {
+        console.error('Error syncing update to Google Calendar:', syncError);
+      }
+
+      // Trigger webhooks
+      try {
+        const { triggerWebhookSubscriptions } = await import('../../../lib/webhookTriggers');
+        await triggerWebhookSubscriptions(
+          existingReservation.restaurant_id,
+          tenantId,
+          'reservation.updated',
+          { reservation_id: reservation_id as string }
+        );
+      } catch (webhookError) {
+        console.error('Error triggering webhooks:', webhookError);
+      }
+
+      return res.status(200).json(updatedReservation as Reservation);
+    } catch (error: any) {
+      console.error('Error updating reservation:', error);
       return res.status(500).json({
         error: 'Internal server error',
         message: error.message,

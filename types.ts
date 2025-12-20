@@ -97,6 +97,9 @@ export interface Reservation {
   table_ids?: string[]; // Legacy array (use reservation_tables junction table)
   has_conflict?: boolean; // Legacy field
   gloria_foods_reservation_id?: string; // External ID from Gloria Foods
+  google_calendar_event_id?: string; // Link to Google Calendar event
+  last_synced_at?: string; // Last successful sync timestamp
+  last_modified_source?: 'LOCAL' | 'GOOGLE_CALENDAR' | 'GLORIA_FOODS'; // Source of last modification
   source?: ReservationSource; // Default 'LOCAL'
   confirmed_at?: string;
   cancelled_at?: string;

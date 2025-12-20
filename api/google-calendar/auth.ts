@@ -18,26 +18,28 @@ function encrypt(text: string): string {
 
 /**
  * OAuth2 callback handler for Google Calendar
- * Exchanges authorization code for access and refresh tokens
+ * GET /api/google-calendar/auth?code=xxx&state=xxx
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { code, state, error } = req.query;
 
-  // Handle OAuth errors
   if (error) {
-    return res.redirect(`/?error=${encodeURIComponent(error as string)}&source=google_calendar`);
+    return res.redirect(`/?error=${encodeURIComponent(error as string)}`);
   }
 
   if (!code) {
     return res.status(400).json({ error: 'Missing authorization code' });
   }
 
-  // Verify state contains tenant_id (for security)
-  if (!state || typeof state !== 'string') {
-    return res.status(400).json({ error: 'Missing or invalid state parameter' });
-  }
-
   try {
+    // Decode state to get tenant_id
+    const stateData = JSON.parse(Buffer.from(state as string, 'base64').toString());
+    const { tenant_id } = stateData;
+
+    if (!tenant_id) {
+      return res.status(400).json({ error: 'Invalid state parameter' });
+    }
+
     // Exchange code for tokens
     const tokenResponse = await fetch('https://oauth2.googleapis.com/token', {
       method: 'POST',
@@ -55,48 +57,56 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (!tokenResponse.ok) {
       const error = await tokenResponse.json();
-      return res.redirect(`/?error=${encodeURIComponent(error.error || 'Failed to exchange code for tokens')}&source=google_calendar`);
+      throw new Error(error.error_description || 'Failed to exchange code for tokens');
     }
 
     const tokens = await tokenResponse.json();
-    const { access_token, refresh_token, expires_in } = tokens;
 
-    if (!refresh_token) {
-      return res.redirect(`/?error=${encodeURIComponent('No refresh token received. Please ensure you granted offline access.')}&source=google_calendar`);
-    }
+    // Encrypt and store tokens
+    const tokensJson = JSON.stringify({
+      access_token: tokens.access_token,
+      refresh_token: tokens.refresh_token,
+    });
+    const encryptedTokens = encrypt(tokensJson);
 
-    // Parse state to get tenant_id
-    const stateData = JSON.parse(Buffer.from(state, 'base64').toString('utf-8'));
-    const { tenant_id } = stateData;
-
-    if (!tenant_id) {
-      return res.status(400).json({ error: 'Missing tenant_id in state' });
-    }
-
-    // Store refresh token encrypted in api_keys table
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
-    const encryptedRefreshToken = encrypt(refresh_token);
 
-    const { error: upsertError } = await supabase
+    // Store in api_keys table
+    await supabase
       .from('api_keys')
       .upsert({
         tenant_id,
         key_type: 'google_calendar',
-        encrypted_key: encryptedRefreshToken,
+        encrypted_key: encryptedTokens,
         updated_at: new Date().toISOString(),
       }, {
         onConflict: 'tenant_id,key_type',
       });
 
-    if (upsertError) {
-      console.error('Error storing refresh token:', upsertError);
-      return res.redirect(`/?error=${encodeURIComponent('Failed to store credentials')}&source=google_calendar`);
+    // Update restaurant profile to enable Google Calendar integration
+    const { data: restaurants } = await supabase
+      .from('restaurants')
+      .select('id, profile_data')
+      .eq('tenant_id', tenant_id);
+
+    if (restaurants && restaurants.length > 0) {
+      for (const restaurant of restaurants) {
+        const profileData = (restaurant.profile_data as any) || {};
+        profileData.integrations = profileData.integrations || {};
+        profileData.integrations.googleCalendar = true;
+
+        await supabase
+          .from('restaurants')
+          .update({ profile_data: profileData })
+          .eq('id', restaurant.id);
+      }
     }
 
     // Redirect back to app with success
-    return res.redirect(`/?google_calendar_connected=true`);
+    // The profile will be updated automatically via the restaurants table update above
+    return res.redirect('/?google_calendar_connected=true&step=4');
   } catch (error: any) {
     console.error('Error in Google Calendar OAuth callback:', error);
-    return res.redirect(`/?error=${encodeURIComponent(error.message || 'OAuth callback failed')}&source=google_calendar`);
+    return res.redirect(`/?error=${encodeURIComponent(error.message || 'Failed to connect Google Calendar')}`);
   }
 }
