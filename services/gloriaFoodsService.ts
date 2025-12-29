@@ -83,27 +83,122 @@ export class GloriaFoodsService {
   }
 
   /**
-   * Fetch menu from Gloria Foods API
+   * Submit order directly to Gloria Foods API v2 (PUSH method)
+   * Uses Accepted Orders API v2 to send order directly to GF
+   * Returns order confirmation with GF order ID
+   * 
+   * Note: restaurantId should be passed separately (from restaurant profile)
+   */
+  async submitOrder(orderData: OrderData, restaurantId?: number): Promise<{
+    orderId: string;
+    status: 'CONFIRMED' | 'PENDING';
+    total: number;
+    estimatedReadyTime?: string;
+  }> {
+    if (!this.masterKey) {
+      throw new Error('Master key required for PUSH method. Please configure GLORIA_FOODS_MASTER_KEY.');
+    }
+
+    try {
+      // Calculate total
+      const total = orderData.items.reduce((sum, item) => {
+        let itemTotal = item.price * item.quantity;
+        // Add modifier prices if any
+        // Note: This would need actual modifier pricing from API
+        return sum + itemTotal;
+      }, 0);
+
+      // Transform order items to GF API v2 format
+      const gfItems = orderData.items.map(item => ({
+        id: parseInt(item.itemId) || 0,
+        name: item.itemName,
+        quantity: item.quantity,
+        price: item.price,
+        // Add modifiers/options if available
+        options: item.modifiers?.map(mod => ({
+          id: parseInt(mod.modifierId) || 0,
+          option_id: parseInt(mod.optionId) || 0,
+        })) || [],
+        special_instructions: item.specialInstructions,
+      }));
+
+      // Split customer name into first/last
+      const nameParts = orderData.customerName.trim().split(/\s+/);
+      const firstName = nameParts[0] || orderData.customerName;
+      const lastName = nameParts.slice(1).join(' ') || '';
+
+      // Prepare order payload for GF API v2 (Accepted Orders format)
+      // Note: restaurant_id should be the numeric GF restaurant ID, not the token
+      const payload = {
+        restaurant_id: restaurantId || 0, // Use provided restaurantId or 0 (GF will use token to identify)
+        client_first_name: firstName,
+        client_last_name: lastName,
+        client_phone: orderData.phone,
+        client_email: orderData.email || '',
+        type: orderData.orderType.toLowerCase(), // pickup, delivery, table_reservation, order_ahead, dine_in
+        items: gfItems,
+        total_price: total,
+        delivery_address: orderData.deliveryAddress || '',
+        special_instructions: orderData.specialInstructions || '',
+      };
+
+      // Submit order to GF Accepted Orders API v2
+      // Note: Endpoint may need to be verified with GF documentation
+      const response = await fetch(`${this.baseUrl}/orders`, {
+        method: 'POST',
+        headers: {
+          'Authorization': this.masterKey, // Master key for PUSH method (raw token, not Bearer)
+          'Glf-Api-Version': '2',
+          'Content-Type': 'application/json',
+          'Accept': 'application/json',
+        },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`Gloria Foods API error: ${response.status} ${response.statusText}. ${errorText}`);
+      }
+
+      const data = await response.json();
+      
+      // GF API v2 returns order with id, status, etc.
+      return {
+        orderId: String(data.id || data.order_id || this.generateOrderId()),
+        status: data.status === 'accepted' || data.status === 'confirmed' ? 'CONFIRMED' : 'PENDING',
+        total: data.total_price || total,
+        estimatedReadyTime: data.fulfill_at || data.estimated_ready_time || this.estimateReadyTime(orderData.items),
+      };
+    } catch (error) {
+      console.error('Error submitting order to Gloria Foods:', error);
+      throw new Error(`Failed to submit order: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  }
+
+  /**
+   * Fetch menu from Gloria Foods API v2
    * Returns structured menu data for AI context
+   * Uses GF API v2 format: Authorization header with raw token (not Bearer), Glf-Api-Version: 2
    */
   async fetchMenu(): Promise<GloriaFoodsMenu> {
     try {
       const response = await fetch(`${this.baseUrl}/menu`, {
         method: 'GET',
         headers: {
-          'Authorization': `Bearer ${this.restaurantToken}`,
-          'Content-Type': 'application/json',
+          'Authorization': this.restaurantToken, // Raw token, not Bearer (GF API v2 format)
+          'Glf-Api-Version': '2', // Required for API v2
+          'Accept': 'application/json', // Request JSON format
         },
       });
 
       if (!response.ok) {
-        throw new Error(`Gloria Foods API error: ${response.status} ${response.statusText}`);
+        const errorText = await response.text();
+        throw new Error(`Gloria Foods API error: ${response.status} ${response.statusText}. ${errorText}`);
       }
 
       const data = await response.json();
       
-      // Transform Gloria Foods API response to our format
-      // Note: Actual API response structure may vary - adjust based on real API docs
+      // Transform Gloria Foods API v2 response to our format
       return this.transformMenuResponse(data);
     } catch (error) {
       console.error('Error fetching Gloria Foods menu:', error);
@@ -112,15 +207,62 @@ export class GloriaFoodsService {
   }
 
   /**
-   * Transform Gloria Foods API response to our Menu format
-   * Adjust this based on actual API response structure
+   * Transform Gloria Foods API v2 response to our Menu format
+   * GF API v2 structure: { id, restaurant_id, currency, categories: [{ id, name, items, groups }] }
    */
   private transformMenuResponse(data: any): GloriaFoodsMenu {
-    // This is a placeholder - adjust based on actual Gloria Foods API response
+    // Transform GF API v2 categories structure
+    const categories = (data.categories || []).map((cat: any) => {
+      // Transform items from GF API v2 format
+      const items = (cat.items || []).map((item: any) => {
+        // Get default price from item or first size
+        let price = item.price || 0;
+        if (item.sizes && item.sizes.length > 0) {
+          const defaultSize = item.sizes.find((s: any) => s.default) || item.sizes[0];
+          price = defaultSize.price || price;
+        }
+
+        // Transform option groups to modifiers
+        const modifiers: GloriaFoodsModifier[] = [];
+        if (item.groups && item.groups.length > 0) {
+          item.groups.forEach((group: any) => {
+            modifiers.push({
+              id: String(group.id),
+              name: group.name,
+              options: (group.options || []).map((opt: any) => ({
+                id: String(opt.id),
+                name: opt.name,
+                price: opt.price || 0,
+              })),
+            });
+          });
+        }
+
+        // Check availability (item is available if not explicitly marked unavailable)
+        const available = item.available !== false;
+
+        return {
+          id: String(item.id),
+          name: item.name || '',
+          description: item.description || undefined,
+          price: price,
+          category: cat.name || '',
+          available: available,
+          modifiers: modifiers.length > 0 ? modifiers : undefined,
+        };
+      });
+
+      return {
+        id: String(cat.id),
+        name: cat.name || '',
+        items: items,
+      };
+    });
+
     return {
-      restaurant_id: data.restaurant_id || '',
+      restaurant_id: String(data.restaurant_id || data.id || ''),
       restaurant_name: data.restaurant_name || '',
-      categories: data.categories || [],
+      categories: categories,
       hours: data.hours || {},
     };
   }

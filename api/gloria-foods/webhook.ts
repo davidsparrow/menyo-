@@ -13,13 +13,18 @@ const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY!;
  * Gloria Foods will POST to this endpoint when order status changes
  */
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // Webhooks from Gloria Foods should include authentication
-  // Check for master key in headers or query params
-  const masterKey = req.headers['x-gloria-master-key'] || req.query.master_key;
+  // Webhooks from Gloria Foods include the Master API Key in the Authorization header
+  // Extract the key from the Authorization header
+  const authHeader = req.headers['authorization'] as string;
+  const masterKey = authHeader; // GloriaFood sends the raw master key in Authorization header
   const expectedMasterKey = process.env.GLORIA_FOODS_MASTER_KEY;
 
   // Verify master key if configured
   if (expectedMasterKey && masterKey !== expectedMasterKey) {
+    console.error('Webhook authentication failed:', {
+      received: masterKey ? 'Key received' : 'No key',
+      expected: expectedMasterKey ? 'Key configured' : 'No key configured'
+    });
     return res.status(401).json({ error: 'Unauthorized: Invalid master key' });
   }
 
@@ -29,48 +34,62 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const webhookData = req.body;
-    
-    // Expected webhook payload structure (adjust based on actual Gloria Foods webhook format)
+
+    // GloriaFood webhook payload structure (based on API V2 documentation)
     const {
-      order_id,
+      id,                      // Order ID
       restaurant_id,
-      status,
-      customer_name,
-      customer_phone,
+      client_first_name,
+      client_last_name,
+      client_email,
+      client_phone,
+      type,                    // pickup, delivery, table_reservation, order_ahead, dine_in
+      status,                  // accepted, rejected, timed_out, pending, canceled
+      total_price,
       items,
-      total,
-      estimated_ready_time,
-      actual_ready_time,
-      event_type, // e.g., 'order_placed', 'order_confirmed', 'order_ready', 'order_completed'
+      fulfill_at,              // UTC timestamp (estimated ready time)
+      delivery_address,
+      special_instructions,
     } = webhookData;
 
-    if (!order_id) {
-      return res.status(400).json({ error: 'Missing order_id in webhook payload' });
+    if (!id) {
+      return res.status(400).json({ error: 'Missing order id in webhook payload' });
     }
+
+    const order_id = id; // Use GloriaFood's 'id' field as order_id
+    const customer_name = `${client_first_name || ''} ${client_last_name || ''}`.trim();
+    const customer_phone = client_phone;
 
     const supabase = createClient(supabaseUrl, supabaseServiceKey);
 
     // Find restaurant by restaurant_id (Gloria Foods restaurant ID)
-    // We may need to store this mapping in the restaurant profile
-    const { data: restaurants } = await supabase
+    // Optimized lookup: Query restaurants and filter by gloriaFoodsRestaurantId in profile_data
+    const { data: restaurants, error: restaurantsError } = await supabase
       .from('restaurants')
-      .select('id, tenant_id, profile_data')
-      .limit(100); // We'll need to match by restaurant_id stored in profile_data
+      .select('id, tenant_id, profile_data');
 
-    // Find matching restaurant (this is a simplified approach)
-    // In production, you'd want to store Gloria Foods restaurant_id in profile_data
+    if (restaurantsError) {
+      console.error('Error querying restaurants:', restaurantsError);
+      return res.status(500).json({ error: 'Failed to query restaurants' });
+    }
+
+    // Find matching restaurant by gloriaFoodsRestaurantId
     let matchingRestaurant = null;
-    for (const restaurant of restaurants || []) {
-      const profile = restaurant.profile_data as any;
-      if (profile?.gloriaFoodsRestaurantId === restaurant_id) {
-        matchingRestaurant = restaurant;
-        break;
+    if (restaurants) {
+      for (const restaurant of restaurants) {
+        const profile = restaurant.profile_data as any;
+        // Match by stored GF restaurant_id or try to match by restaurant_id from webhook
+        if (profile?.gloriaFoodsRestaurantId === restaurant_id || 
+            String(profile?.gloriaFoodsRestaurantId) === String(restaurant_id)) {
+          matchingRestaurant = restaurant;
+          break;
+        }
       }
     }
 
     if (!matchingRestaurant) {
       console.warn(`No matching restaurant found for Gloria Foods restaurant_id: ${restaurant_id}`);
-      // Still return 200 to acknowledge webhook receipt
+      // Still return 200 to acknowledge webhook receipt (GF will retry if we return error)
       return res.status(200).json({ received: true, message: 'Webhook received but restaurant not found' });
     }
 
@@ -88,11 +107,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       gloria_foods_order_id: order_id,
       customer_name: customer_name,
       phone: customer_phone,
+      email: client_email,
       items: items || [],
-      total: total || 0,
+      order_type: type?.toUpperCase() || 'PICKUP',
+      delivery_address: delivery_address,
+      total: total_price || 0,
       status: mapGloriaFoodsStatus(status),
-      estimated_ready_time: estimated_ready_time,
-      actual_ready_time: actual_ready_time,
+      estimated_ready_time: fulfill_at,
+      actual_ready_time: null, // Will be updated when order is completed
+      special_instructions: special_instructions,
       updated_at: new Date().toISOString(),
     };
 
@@ -122,12 +145,53 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
-    // Handle specific event types (e.g., trigger AI voice call when order is ready)
-    if (event_type === 'order_ready' && customer_phone) {
+    // Send email notification to restaurant owner on order confirmation
+    if (status === 'accepted' || status === 'confirmed') {
+      try {
+        const profile = matchingRestaurant.profile_data as any;
+        const ownerEmail = profile?.ownerEmail;
+        
+        if (ownerEmail) {
+          const { createEmailService } = await import('../../services/emailService');
+          const emailService = createEmailService();
+          
+          await emailService.sendOrderNotification(ownerEmail, {
+            orderId: order_id,
+            customerName: customer_name,
+            phone: customer_phone,
+            email: client_email,
+            items: (items || []).map((item: any) => ({
+              itemName: item.name || item.item_name || 'Item',
+              quantity: item.quantity || 1,
+              price: item.price || 0,
+            })),
+            total: total_price || 0,
+            orderType: type || 'pickup',
+            estimatedReadyTime: fulfill_at,
+            specialInstructions: special_instructions,
+          });
+        }
+      } catch (emailError) {
+        console.error('Error sending order notification email:', emailError);
+        // Don't fail webhook if email fails
+      }
+    }
+
+    // Handle specific order statuses (e.g., trigger AI voice call when order is ready)
+    if (status === 'ready' && customer_phone) {
       // TODO: Trigger AI voice call to customer
       // This would integrate with Twilio and Gemini Live API
       console.log(`Order ${order_id} is ready! Should call customer at ${customer_phone}`);
     }
+
+    // Log webhook receipt for debugging
+    console.log('GloriaFood webhook processed:', {
+      order_id,
+      restaurant_id,
+      status,
+      customer_name,
+      total: total_price,
+    });
 
     return res.status(200).json({ 
       received: true,

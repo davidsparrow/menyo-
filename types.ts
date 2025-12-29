@@ -186,6 +186,9 @@ export interface RestaurantProfile {
   voiceId: string; // Gemini voice name
   phoneNumber: string | null;
   gloriaFoodsToken?: string;
+  gloriaFoodsRestaurantId?: string; // GF restaurant_id for webhook matching
+  gloriaFoodsOrderMethod?: 'HYBRID' | 'PUSH'; // Order submission method preference
+  ownerEmail?: string; // Restaurant owner email for notifications
   
   // New Knowledge Base Fields
   bookingPreference: BookingPreference;

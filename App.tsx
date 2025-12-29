@@ -2,6 +2,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Upload, Check, Store, Link2, Phone, Mic, ArrowRight, Loader2, KeyRound, BookOpen, Edit3, Settings, Users, Accessibility, Baby, UtensilsCrossed, MessageSquare, Send, X, Bot, Save, Plug, Globe, Server, Plus, Trash2, ExternalLink, Mail, Lock, MonitorPlay, ShieldCheck, Home, ShoppingBag, Calendar, ChevronLeft, ChevronRight, Bell, Smartphone, RefreshCw, LayoutGrid, List, AlertTriangle, Volume2, VolumeX, Play, StopCircle } from 'lucide-react';
 import { Dashboard } from './components/Dashboard';
+import { OrderConfirmation } from './components/OrderConfirmation';
 import { geminiService } from './services/geminiService';
 import { RestaurantProfile, VoiceOption, ConnectedApp, Reservation, Table } from './types';
 import { getTenantApiKey } from './lib/api-keys';
@@ -66,6 +67,16 @@ function App() {
   // Order completion state (for Gloria Foods hybrid approach)
   const [pendingOrderCheckoutUrl, setPendingOrderCheckoutUrl] = useState<string | null>(null);
   const [isPreparingOrder, setIsPreparingOrder] = useState(false);
+  const [confirmedOrder, setConfirmedOrder] = useState<{
+    orderId: string;
+    customerName: string;
+    total: number;
+    estimatedReadyTime?: string;
+    orderType: string;
+    status: 'PENDING' | 'CONFIRMED' | 'PREPARING' | 'READY' | 'COMPLETED';
+    phone?: string;
+    email?: string;
+  } | null>(null);
 
   // Test Bot Text Chat State
   const [showTextChat, setShowTextChat] = useState(false);
@@ -95,6 +106,8 @@ function App() {
     },
     voiceId: VoiceOption.Zephyr,
     phoneNumber: null,
+    gloriaFoodsOrderMethod: 'HYBRID' as 'HYBRID' | 'PUSH',
+    ownerEmail: undefined,
     
     // New Fields defaults
     bookingPreference: 'GLORIA_FOODS',
@@ -335,15 +348,35 @@ function App() {
         throw new Error(error.error || 'Failed to store Gloria Foods token');
       }
 
+      // Try to fetch menu to get restaurant_id
+      let restaurantId: string | undefined;
+      try {
+        const menuResponse = await fetch('/api/gloria-foods/menu', {
+          headers: {
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+        });
+        if (menuResponse.ok) {
+          const menuData = await menuResponse.json();
+          restaurantId = menuData.menu?.restaurant_id;
+        }
+      } catch (err) {
+        console.warn('Could not fetch menu to get restaurant_id:', err);
+      }
+
       // Update profile (don't auto-enable integrations - user enables them separately)
-      setProfile(prev => ({
-        ...prev,
+      const updatedProfile = {
+        ...profile,
         gloriaFoodsToken: gloriaInput,
+        gloriaFoodsRestaurantId: restaurantId || profile.gloriaFoodsRestaurantId,
         // Also update the connected app config for consistency
-        connectedApps: prev.connectedApps.map(app => 
+        connectedApps: profile.connectedApps.map(app => 
           app.id === 'app_gloria' ? { ...app, config: { ...app.config, apiKey: gloriaInput } } : app
         )
-      }));
+      };
+      
+      setProfile(updatedProfile);
+      await saveProfile(updatedProfile);
 
       alert('Gloria Foods API token saved! Now enable Orders or Calendar integrations below.');
       
@@ -939,13 +972,36 @@ ${orderInstructions}
       }
 
       const data = await response.json();
-      setPendingOrderCheckoutUrl(data.order.checkoutUrl);
       
-      // Add message to chat
-      setKioskChatHistory(prev => [...prev, {
-        role: 'model',
-        text: `Your order is ready! Click the button below to complete payment securely.`
-      }]);
+      // Check if PUSH method (order confirmed immediately) or HYBRID (needs checkout)
+      if (data.order.method === 'PUSH' && data.order.status === 'CONFIRMED') {
+        // PUSH method: Show order confirmation
+        setConfirmedOrder({
+          orderId: data.order.orderId,
+          customerName: customerName || 'Guest',
+          total: data.order.total,
+          estimatedReadyTime: data.order.estimatedReadyTime,
+          orderType: 'PICKUP', // Could be extracted from conversation
+          status: 'CONFIRMED',
+          phone: phone || undefined,
+          email: extractFromConversation(conversationText, ['email']) || undefined,
+        });
+        
+        // Add message to chat
+        setKioskChatHistory(prev => [...prev, {
+          role: 'model',
+          text: `Great! Your order #${data.order.orderId} has been confirmed! You'll see a confirmation screen with all the details.`
+        }]);
+      } else {
+        // HYBRID method: Show checkout URL
+        setPendingOrderCheckoutUrl(data.order.checkoutUrl);
+        
+        // Add message to chat
+        setKioskChatHistory(prev => [...prev, {
+          role: 'model',
+          text: `Your order is ready! Click the button below to complete payment securely.`
+        }]);
+      }
 
     } catch (error: any) {
       console.error('Error preparing order:', error);
@@ -1354,10 +1410,59 @@ ${orderInstructions}
               Enable Orders Integration
             </button>
           ) : (
-             <div className="space-y-3">
+             <div className="space-y-4">
                 <div className="text-sm text-green-700 font-medium flex items-center gap-2 bg-green-50 py-2 px-3 rounded-lg w-fit">
                    <Check className="w-4 h-4" /> Orders Enabled
                 </div>
+                
+                {/* Order Method Selection */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
+                    Order Submission Method
+                  </label>
+                  <select
+                    value={profile.gloriaFoodsOrderMethod || 'HYBRID'}
+                    onChange={async (e) => {
+                      const updated = {...profile, gloriaFoodsOrderMethod: e.target.value as 'HYBRID' | 'PUSH'};
+                      setProfile(updated);
+                      await saveProfile(updated);
+                    }}
+                    className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-900 font-medium focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  >
+                    <option value="HYBRID">Hybrid (Redirect to GF Checkout)</option>
+                    <option value="PUSH">PUSH (Direct API Submission)</option>
+                  </select>
+                  <p className="text-xs text-slate-400 mt-2">
+                    {profile.gloriaFoodsOrderMethod === 'PUSH' 
+                      ? 'Orders are sent directly to Gloria Foods API. Requires Master Key.'
+                      : 'Customer is redirected to Gloria Foods checkout for payment.'}
+                  </p>
+                </div>
+
+                {/* Owner Email for Notifications */}
+                <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                  <label className="block text-xs font-bold text-slate-500 mb-2 uppercase tracking-wide">
+                    Owner Email (for order notifications)
+                  </label>
+                  <div className="relative">
+                    <Mail className="w-5 h-5 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                    <input
+                      type="email"
+                      placeholder="owner@restaurant.com"
+                      value={profile.ownerEmail || ''}
+                      onChange={async (e) => {
+                        const updated = {...profile, ownerEmail: e.target.value};
+                        setProfile(updated);
+                        await saveProfile(updated);
+                      }}
+                      className="w-full pl-10 pr-4 py-3 border border-slate-200 rounded-lg bg-white text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500"
+                    />
+                  </div>
+                  <p className="text-xs text-slate-400 mt-2">
+                    You'll receive email notifications when new orders are placed.
+                  </p>
+                </div>
+
                 <button
                    onClick={syncGloriaFoodsMenu}
                    disabled={loading}
@@ -2714,6 +2819,24 @@ ${orderInstructions}
                    </p>
                 </div>
              </div>
+          )}
+
+          {/* Order Confirmation Modal */}
+          {confirmedOrder && (
+            <OrderConfirmation
+              orderId={confirmedOrder.orderId}
+              customerName={confirmedOrder.customerName}
+              total={confirmedOrder.total}
+              estimatedReadyTime={confirmedOrder.estimatedReadyTime}
+              orderType={confirmedOrder.orderType}
+              status={confirmedOrder.status}
+              phone={confirmedOrder.phone}
+              email={confirmedOrder.email}
+              onClose={() => {
+                setConfirmedOrder(null);
+                resetKioskSession();
+              }}
+            />
           )}
 
           {(kioskView === 'ORDER' || kioskView === 'RESERVE') && (
