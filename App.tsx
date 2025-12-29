@@ -135,6 +135,9 @@ function App() {
       { id: 't5', autoNumber: 5, name: 'Family Round', maxGuests: 8 },
     ],
 
+    // Kiosk Settings
+    kioskInactivityTimeoutMinutes: 5,
+
     // Security
     adminPassword: "Admin",
 
@@ -634,14 +637,15 @@ function App() {
     setLastActivityTime(Date.now());
   }, [kioskChatHistory, kioskInput, orderState]);
 
-  // Auto-reset on inactivity (5 minutes)
+  // Auto-reset on inactivity (configurable timeout)
   useEffect(() => {
     if (kioskView !== 'ORDER' && kioskView !== 'RESERVE') return;
-    
+
     const checkInterval = setInterval(() => {
       const timeSinceActivity = Date.now() - lastActivityTime;
-      const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes
-      
+      const timeoutMinutes = profile.kioskInactivityTimeoutMinutes || 5;
+      const INACTIVITY_TIMEOUT = timeoutMinutes * 60 * 1000;
+
       // Only auto-reset if there's actual conversation/order data
       if (timeSinceActivity >= INACTIVITY_TIMEOUT) {
         if (kioskChatHistory.length > 1 || orderState.items.length > 0) {
@@ -657,7 +661,7 @@ function App() {
     }, 30000); // Check every 30 seconds
 
     return () => clearInterval(checkInterval);
-  }, [kioskView, lastActivityTime, kioskChatHistory.length, orderState.items.length]);
+  }, [kioskView, lastActivityTime, kioskChatHistory.length, orderState.items.length, profile.kioskInactivityTimeoutMinutes]);
 
 
   // --- Prompt Generation Logic ---
@@ -2565,6 +2569,43 @@ ${orderInstructions}
                              onChange={(e) => setProfile(p => ({...p, maxGuestsPerHour: parseInt(e.target.value)}))}
                              className="w-full p-3 border border-slate-200 rounded-lg font-mono text-lg bg-white text-slate-900"
                           />
+                       </div>
+                    </div>
+                 </div>
+
+                 {/* Kiosk Settings */}
+                 <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm">
+                    <h3 className="text-lg font-bold text-slate-900 mb-6 flex items-center gap-2">
+                       <MonitorPlay className="w-5 h-5 text-brand-600" /> Kiosk Settings
+                    </h3>
+                    <div className="space-y-4">
+                       <div>
+                          <label className="text-sm font-bold text-slate-700 block mb-2">
+                             Auto-Reset Timeout (minutes)
+                          </label>
+                          <p className="text-xs text-slate-500 mb-3">
+                             How long to wait before automatically resetting the kiosk when inactive.
+                             This ensures the next customer gets a fresh start. Range: 1-60 minutes.
+                          </p>
+                          <input
+                             type="number"
+                             min="1"
+                             max="60"
+                             value={profile.kioskInactivityTimeoutMinutes || 5}
+                             onChange={(e) => {
+                               const inputValue = parseInt(e.target.value);
+                               const minutes = isNaN(inputValue)
+                                 ? 5
+                                 : Math.max(1, Math.min(60, inputValue));
+                               const updated = {...profile, kioskInactivityTimeoutMinutes: minutes};
+                               setProfile(updated);
+                               saveProfile(updated);
+                             }}
+                             className="w-full p-3 border border-slate-200 rounded-lg font-mono text-lg bg-white text-slate-900 focus:ring-2 focus:ring-brand-500"
+                          />
+                          <p className="text-xs text-slate-400 mt-2">
+                             Current setting: <span className="font-semibold">{profile.kioskInactivityTimeoutMinutes || 5} minutes</span>
+                          </p>
                        </div>
                     </div>
                  </div>

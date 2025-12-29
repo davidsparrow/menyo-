@@ -203,6 +203,9 @@ export interface RestaurantProfile {
   maxGuestsPerHour: number;
   tables: TableLegacy[]; // Legacy format (stored in JSONB, will migrate to tables table)
 
+  // Kiosk Settings
+  kioskInactivityTimeoutMinutes?: number; // Auto-reset timeout in minutes (default: 5)
+
   // Security
   adminPassword?: string;
 
