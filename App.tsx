@@ -9,6 +9,8 @@ import { getTenantApiKey } from './lib/api-keys';
 import { getCurrentUser } from './lib/auth';
 import { supabase } from './lib/supabase';
 import { checkReservationAvailability, createReservation, getAvailableSlots } from './lib/reservations';
+import { createOrderState, addItemToOrder, removeItemFromOrder, updateItemQuantity, setCustomerInfo, setOrderPreferences, calculateTotal, isOrderComplete, type OrderState } from './lib/orderState';
+import { filterMenuItems, getMenuItemById, searchMenuItems, type MenuFilter } from './lib/menuHelpers';
 import QRCode from 'react-qr-code';
 
 function App() {
@@ -77,6 +79,9 @@ function App() {
     phone?: string;
     email?: string;
   } | null>(null);
+  
+  // Order state management (for function calling)
+  const [orderState, setOrderState] = useState<OrderState>(createOrderState());
 
   // Test Bot Text Chat State
   const [showTextChat, setShowTextChat] = useState(false);
@@ -651,20 +656,21 @@ function App() {
     }
 
     const orderInstructions = p.integrations.gloriaFoodsOrders 
-      ? `- When a customer wants to place an order:
-  1. Ask what they'd like to order and collect ALL details:
-     * Menu items and quantities
-     * Any modifications or customizations
-     * Dietary restrictions or allergies
-     * Pickup or delivery preference
-     * Customer name and phone number
-     * Special instructions
-  2. Confirm the complete order summary with total price
-  3. When customer confirms (says "yes", "that's correct", etc.), say:
-     "Perfect! I've prepared your order. You'll receive a secure checkout link to complete payment. It should appear on your screen shortly."
-  4. DO NOT try to generate URLs or checkout links yourself - the system will handle that automatically.
-- Always verify items are available before confirming.
-- If an item is unavailable, suggest alternatives.`
+      ? `- When a customer wants to place an order, use the available functions to collect structured order data:
+  1. Use 'get_menu_items' to show menu items when customer asks "what's on the menu" or wants to see options
+  2. Use 'add_item_to_order' when customer wants to order something - call this function immediately when they mention an item
+  3. Use 'set_customer_info' to collect their name and phone number
+  4. Use 'set_order_preferences' to set pickup/delivery and special instructions
+  5. Use 'get_menu_item_details' if customer asks about a specific item's details or modifiers
+  6. Be friendly and conversational - don't just call functions, explain what you're doing
+  7. When you've collected all items and customer info, confirm the complete order summary with total price
+  8. When customer confirms (says "yes", "that's correct", "place the order", etc.), say:
+     "Perfect! I've prepared your order. Click the 'Complete Order' button to finish your purchase."
+  9. DO NOT try to generate URLs or checkout links yourself - the system will handle that automatically.
+- Always verify items are available before adding to order (check menu data).
+- If an item is unavailable, suggest alternatives from the menu.
+- For dietary restrictions, use 'get_menu_items' with filters to show appropriate options.
+- Be patient and helpful - guide customers through the ordering process naturally.`
       : `- For takeout orders, please ask them to call ${p.humanSupportPhone || p.info.phone} or visit our website at ${p.info.website || 'our website'}.`;
 
     const prompt = `You are an AI Voice Assistant for ${p.info.name}, a ${p.info.cuisine} restaurant located at ${p.info.address}.
@@ -728,6 +734,7 @@ ${orderInstructions}
       setUnlockError(false);
       setKioskView('HOME'); // Reset kiosk view
       setKioskChatHistory([]); // Clear chat
+      setOrderState(createOrderState()); // Reset order state
     } else {
       setUnlockError(true);
     }
@@ -755,6 +762,7 @@ ${orderInstructions}
      // 4. Clear Interaction Data
      setKioskInput('');
      setKioskChatHistory([]);
+     setOrderState(createOrderState()); // Reset order state
 
      // 5. Navigate Home
      setKioskView('HOME');
@@ -856,6 +864,134 @@ ${orderInstructions}
     }
   };
 
+  // Function handler for Gemini function calls
+  const handleFunctionCall = async (functionName: string, args: any): Promise<any> => {
+    const menuData = profile.menuData;
+    
+    switch (functionName) {
+      case 'add_item_to_order': {
+        const { itemId, quantity = 1, modifiers, specialInstructions } = args;
+        const item = getMenuItemById(menuData, itemId);
+        
+        if (!item) {
+          return { success: false, error: `Menu item with ID ${itemId} not found` };
+        }
+        
+        const newState = addItemToOrder(
+          orderState,
+          itemId,
+          item.name,
+          quantity,
+          item.price,
+          modifiers,
+          specialInstructions
+        );
+        setOrderState(newState);
+        
+        return {
+          success: true,
+          message: `Added ${quantity}x ${item.name} to your order`,
+          item: { id: item.id, name: item.name, price: item.price, quantity },
+          orderTotal: calculateTotal(newState),
+        };
+      }
+      
+      case 'remove_item_from_order': {
+        const { itemId } = args;
+        const newState = removeItemFromOrder(orderState, itemId);
+        setOrderState(newState);
+        
+        return {
+          success: true,
+          message: 'Item removed from order',
+          orderTotal: calculateTotal(newState),
+        };
+      }
+      
+      case 'update_item_quantity': {
+        const { itemId, quantity } = args;
+        const newState = updateItemQuantity(orderState, itemId, quantity);
+        setOrderState(newState);
+        
+        return {
+          success: true,
+          message: `Updated quantity`,
+          orderTotal: calculateTotal(newState),
+        };
+      }
+      
+      case 'set_customer_info': {
+        const { name, phone, email } = args;
+        const newState = setCustomerInfo(orderState, name, phone, email);
+        setOrderState(newState);
+        
+        return {
+          success: true,
+          message: `Customer information saved: ${name}`,
+        };
+      }
+      
+      case 'set_order_preferences': {
+        const { orderType, deliveryAddress, specialInstructions } = args;
+        const newState = setOrderPreferences(orderState, orderType, deliveryAddress, specialInstructions);
+        setOrderState(newState);
+        
+        return {
+          success: true,
+          message: `Order preferences set: ${orderType}`,
+        };
+      }
+      
+      case 'get_menu_items': {
+        const { category, filters = [], limit = 6 } = args;
+        const menuFilter: MenuFilter = {
+          category,
+          dietaryRestrictions: filters,
+        };
+        
+        const items = filterMenuItems(menuData, menuFilter, limit);
+        
+        return {
+          success: true,
+          items: items.map(item => ({
+            id: item.id,
+            name: item.name,
+            description: item.description,
+            price: item.price,
+            category: item.category,
+            available: item.available,
+          })),
+          count: items.length,
+        };
+      }
+      
+      case 'get_menu_item_details': {
+        const { itemId } = args;
+        const item = getMenuItemById(menuData, itemId);
+        
+        if (!item) {
+          return { success: false, error: `Menu item with ID ${itemId} not found` };
+        }
+        
+        return {
+          success: true,
+          item: {
+            id: item.id,
+            name: item.name,
+            description: item.description,
+            price: item.price,
+            category: item.category,
+            available: item.available,
+            modifiers: item.modifiers,
+          },
+        };
+      }
+      
+      default:
+        return { success: false, error: `Unknown function: ${functionName}` };
+    }
+  };
+
   const handleKioskSubmit = async (e?: React.FormEvent) => {
     e?.preventDefault();
     if (!kioskInput.trim() || isKioskProcessing) return;
@@ -876,25 +1012,52 @@ ${orderInstructions}
          ? "Context: The user is using the kiosk to PLACE AN ORDER. " 
          : "Context: The user is using the kiosk to MAKE A RESERVATION. ";
 
-      const responseText = await geminiService.sendChatMessage(
-         apiHistory, 
-         profile.editableSystemPrompt,
-         contextPrefix + userText
-      );
+      let responseText: string;
+      let functionCalls: any[] | undefined;
+
+      // Use function calling for ORDER view if Gloria Foods Orders is enabled
+      if (kioskView === 'ORDER' && profile.integrations.gloriaFoodsOrders && profile.menuData) {
+        const result = await geminiService.sendChatMessageWithFunctions(
+          apiHistory,
+          profile.editableSystemPrompt,
+          contextPrefix + userText,
+          profile.menuData,
+          handleFunctionCall,
+          tenantApiKey || undefined
+        );
+        responseText = result.text;
+        functionCalls = result.functionCalls;
+        
+        // Log function calls for debugging
+        if (functionCalls && functionCalls.length > 0) {
+          console.log('Function calls executed:', functionCalls);
+        }
+      } else {
+        // Use regular chat for reservations or when menu data not available
+        responseText = await geminiService.sendChatMessage(
+          apiHistory, 
+          profile.editableSystemPrompt,
+          contextPrefix + userText,
+          tenantApiKey || undefined
+        );
+      }
 
       setKioskChatHistory(prev => [...prev, { role: 'model', text: responseText }]);
       await speakText(responseText);
 
-      // Check if AI response indicates order is ready (for Gloria Foods integration)
+      // Check if order is complete and ready
       if (kioskView === 'ORDER' && profile.integrations.gloriaFoodsOrders) {
-        const orderReadyKeywords = ['prepared your order', 'checkout', 'complete payment', 'secure checkout link'];
-        const isOrderReady = orderReadyKeywords.some(keyword => 
-          responseText.toLowerCase().includes(keyword.toLowerCase())
-        );
-        
-        if (isOrderReady) {
-          // Order is confirmed - prepare to show checkout button
-          // We'll extract order details and prepare order when user clicks "Complete Order"
+        if (isOrderComplete(orderState)) {
+          // Order is complete - show completion button
+          const orderReadyKeywords = ['prepared your order', 'checkout', 'complete payment', 'secure checkout link', 'ready to place'];
+          const isOrderReady = orderReadyKeywords.some(keyword => 
+            responseText.toLowerCase().includes(keyword.toLowerCase())
+          );
+          
+          if (isOrderReady || isOrderComplete(orderState)) {
+            // Order is confirmed - prepare to show checkout button
+            // The order state is already populated via function calls
+          }
         }
       }
 
@@ -919,29 +1082,27 @@ ${orderInstructions}
     }
   };
 
-  // Handle order completion - extract order details and call API
+  // Handle order completion - use order state from function calls
   const handleCompleteOrder = async () => {
     if (!profile.integrations.gloriaFoodsOrders || kioskView !== 'ORDER') return;
+    
+    // Check if order is complete
+    if (!isOrderComplete(orderState)) {
+      alert('Please complete your order details. Make sure you\'ve provided:\n- Items to order\n- Your name\n- Your phone number\n- Pickup or delivery preference');
+      setIsPreparingOrder(false);
+      return;
+    }
     
     setIsPreparingOrder(true);
     
     try {
-      // Extract order details from conversation
-      // This is a simplified extraction - in production, you'd want more sophisticated NLP
-      const conversationText = kioskChatHistory.map(msg => msg.text).join(' ');
-      
-      // For MVP, we'll prompt user for basic info if not in conversation
-      // In production, you'd parse the conversation more intelligently
-      const customerName = extractFromConversation(conversationText, ['name', 'i\'m', 'this is']) || 'Customer';
-      const phone = extractFromConversation(conversationText, ['phone', 'number']) || '';
-      
-      // Extract items (simplified - would need better parsing in production)
-      // For now, we'll create a basic order structure
-      // In production, you'd parse items, quantities, prices from conversation
-      const items = extractOrderItems(conversationText);
+      // Use order state directly (populated via function calls)
+      const customerName = orderState.customerName!;
+      const phone = orderState.phone!;
+      const items = orderState.items;
       
       if (items.length === 0) {
-        alert('Could not extract order items. Please continue the conversation with the AI to specify your order.');
+        alert('Your order is empty. Please add items to your order.');
         setIsPreparingOrder(false);
         return;
       }
@@ -965,8 +1126,9 @@ ${orderInstructions}
           customerName,
           phone: phone || '000-000-0000', // Fallback if not provided
           items,
-          orderType: 'PICKUP', // Default to pickup, could be extracted from conversation
-          specialInstructions: extractFromConversation(conversationText, ['special', 'note', 'instruction']),
+          orderType: orderState.orderType || 'PICKUP',
+          deliveryAddress: orderState.deliveryAddress,
+          specialInstructions: orderState.specialInstructions,
         }),
       });
 

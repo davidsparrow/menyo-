@@ -340,41 +340,68 @@ export class GeminiService {
         history: history,
       });
 
-      const response = await chat.sendMessage({ message: message });
+      let response = await chat.sendMessage({ message: message });
       const functionCalls: Array<{ name: string; args: any; result: any }> = [];
+      let maxIterations = 5; // Prevent infinite loops
+      let iteration = 0;
 
-      // Check for function calls in response
+      // Handle function calling loop - Gemini may call multiple functions
+      while (iteration < maxIterations) {
+        const candidates = response.candidates || [];
+        let hasFunctionCall = false;
+
+        for (const candidate of candidates) {
+          const content = candidate.content;
+          if (content?.parts) {
+            for (const part of content.parts) {
+              if (part.functionCall) {
+                hasFunctionCall = true;
+                const functionName = part.functionCall.name;
+                const args = part.functionCall.args || {};
+                
+                // Call the handler function
+                const result = await onFunctionCall(functionName, args);
+                
+                functionCalls.push({ name: functionName, args, result });
+                
+                // Send function result back to the model
+                response = await chat.sendMessage({
+                  parts: [{
+                    functionResponse: {
+                      name: functionName,
+                      response: result,
+                    },
+                  }],
+                });
+                break; // Process one function call at a time
+              }
+            }
+          }
+        }
+
+        if (!hasFunctionCall) {
+          // No more function calls, get the final text response
+          break;
+        }
+
+        iteration++;
+      }
+
+      // Extract text from final response
       const candidates = response.candidates || [];
+      let text = "I didn't catch that.";
       for (const candidate of candidates) {
         const content = candidate.content;
         if (content?.parts) {
           for (const part of content.parts) {
-            if (part.functionCall) {
-              const functionName = part.functionCall.name;
-              const args = part.functionCall.args || {};
-              
-              // Call the handler function
-              const result = await onFunctionCall(functionName, args);
-              
-              functionCalls.push({ name: functionName, args, result });
-              
-              // Send function result back to the model
-              await chat.sendMessage({
-                parts: [{
-                  functionResponse: {
-                    name: functionName,
-                    response: result,
-                  },
-                }],
-              });
+            if (part.text) {
+              text = part.text;
+              break;
             }
           }
         }
+        if (text !== "I didn't catch that.") break;
       }
-
-      // Get final text response
-      const finalResponse = await chat.sendMessage({ message: "Continue the conversation naturally." });
-      const text = finalResponse.text || "I didn't catch that.";
 
       return { text, functionCalls: functionCalls.length > 0 ? functionCalls : undefined };
     } catch (error) {
