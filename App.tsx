@@ -626,6 +626,39 @@ function App() {
     botChatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [botChatHistory]);
 
+  // Track last activity time for auto-reset
+  const [lastActivityTime, setLastActivityTime] = useState(Date.now());
+
+  // Update activity time on any interaction
+  useEffect(() => {
+    setLastActivityTime(Date.now());
+  }, [kioskChatHistory, kioskInput, orderState]);
+
+  // Auto-reset on inactivity (5 minutes)
+  useEffect(() => {
+    if (kioskView !== 'ORDER' && kioskView !== 'RESERVE') return;
+    
+    const checkInterval = setInterval(() => {
+      const timeSinceActivity = Date.now() - lastActivityTime;
+      const INACTIVITY_TIMEOUT = 5 * 60 * 1000; // 5 minutes
+      
+      // Only auto-reset if there's actual conversation/order data
+      if (timeSinceActivity >= INACTIVITY_TIMEOUT) {
+        if (kioskChatHistory.length > 1 || orderState.items.length > 0) {
+          if (kioskView === 'ORDER') {
+            startNewOrder(); // Clear order but stay in ORDER view
+            setLastActivityTime(Date.now()); // Reset activity time after auto-reset
+          } else {
+            resetKioskSession(); // For reservations, go back to HOME
+            setLastActivityTime(Date.now()); // Reset activity time after auto-reset
+          }
+        }
+      }
+    }, 30000); // Check every 30 seconds
+
+    return () => clearInterval(checkInterval);
+  }, [kioskView, lastActivityTime, kioskChatHistory.length, orderState.items.length]);
+
 
   // --- Prompt Generation Logic ---
   const generateSystemPrompt = () => {
@@ -670,7 +703,11 @@ function App() {
 - Always verify items are available before adding to order (check menu data).
 - If an item is unavailable, suggest alternatives from the menu.
 - For dietary restrictions, use 'get_menu_items' with filters to show appropriate options.
-- Be patient and helpful - guide customers through the ordering process naturally.`
+- Be patient and helpful - guide customers through the ordering process naturally.
+- IMPORTANT: If you see "NEW CUSTOMER" or "FRESH ORDER" in the context, this is a completely new customer.
+  Completely forget any previous conversations, order details, or customer preferences.
+  Do NOT reference previous orders, previous customers, or assume anything about this customer's preferences.
+  Each customer is different - start fresh and help this new customer from the beginning.`
       : `- For takeout orders, please ask them to call ${p.humanSupportPhone || p.info.phone} or visit our website at ${p.info.website || 'our website'}.`;
 
     const prompt = `You are an AI Voice Assistant for ${p.info.name}, a ${p.info.cuisine} restaurant located at ${p.info.address}.
@@ -740,6 +777,29 @@ ${orderInstructions}
     }
   };
   
+  // Track if this is a new order session (for AI context)
+  const [isNewOrderSession, setIsNewOrderSession] = useState(true);
+
+  // Start a new order (clears state but stays in ORDER view)
+  const startNewOrder = () => {
+    // Clear all order-related state
+    setOrderState(createOrderState());
+    setPendingOrderCheckoutUrl(null);
+    setConfirmedOrder(null);
+    setKioskInput('');
+    
+    // Mark as new session for AI context
+    setIsNewOrderSession(true);
+    
+    // Start with welcome message
+    setKioskChatHistory([{ 
+      role: 'model', 
+      text: "Hi! I'm ready to help you with a fresh order. What would you like today?" 
+    }]);
+    
+    // Stay in ORDER view - don't navigate to HOME
+  };
+
   // Kiosk Session Helper
   const resetKioskSession = () => {
      // 1. Stop Microphone
@@ -763,6 +823,7 @@ ${orderInstructions}
      setKioskInput('');
      setKioskChatHistory([]);
      setOrderState(createOrderState()); // Reset order state
+     setIsNewOrderSession(true); // Reset new session flag
 
      // 5. Navigate Home
      setKioskView('HOME');
@@ -999,6 +1060,7 @@ ${orderInstructions}
     const userText = kioskInput;
     setKioskInput('');
     setKioskChatHistory(prev => [...prev, { role: 'user', text: userText }]);
+    setLastActivityTime(Date.now()); // Update activity time on user input
     setIsKioskProcessing(true);
 
     try {
@@ -1007,10 +1069,20 @@ ${orderInstructions}
          parts: [{ text: msg.text }]
       }));
       
-      // Inject slight context based on view
-      const contextPrefix = kioskView === 'ORDER' 
+      // Inject context based on view and new customer status
+      let contextPrefix = kioskView === 'ORDER' 
          ? "Context: The user is using the kiosk to PLACE AN ORDER. " 
          : "Context: The user is using the kiosk to MAKE A RESERVATION. ";
+
+      // Add new customer context if this is a fresh order session
+      if (isNewOrderSession && kioskView === 'ORDER') {
+        contextPrefix = "IMPORTANT: This is a NEW CUSTOMER starting a FRESH ORDER. " +
+          "Forget any previous conversation, order details, or customer preferences. " +
+          "Do NOT reference anything from previous customers. " +
+          "Start completely fresh and help this new customer from the beginning. " +
+          "Context: The user is using the kiosk to PLACE AN ORDER. ";
+        setIsNewOrderSession(false); // Mark session as started
+      }
 
       let responseText: string;
       let functionCalls: any[] | undefined;
@@ -1321,6 +1393,8 @@ ${orderInstructions}
     if (view === 'DEPLOYED') {
        if (kioskView === 'ORDER') {
           setKioskChatHistory([{ role: 'model', text: "Hi! What can I get started for you today? Check out our specials on the right." }]);
+          setIsNewOrderSession(true); // Mark as new session when switching to ORDER view
+          setOrderState(createOrderState()); // Reset order state
        } else if (kioskView === 'RESERVE') {
           setKioskChatHistory([{ role: 'model', text: "Welcome! When would you like to join us for dinner?" }]);
        }
@@ -3014,6 +3088,27 @@ ${orderInstructions}
                         {kioskView === 'ORDER' ? <ShoppingBag className="w-5 h-5 text-orange-500" /> : <Calendar className="w-5 h-5 text-purple-500" />}
                         {kioskView === 'ORDER' ? 'Order Assistant' : 'Reservations'}
                       </h3>
+                      
+                      {/* Action buttons for ORDER view */}
+                      {kioskView === 'ORDER' && (
+                        <div className="flex gap-2 items-center">
+                          <button
+                            onClick={startNewOrder}
+                            className="px-3 py-1.5 text-xs font-medium bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition"
+                            title="Start a new order"
+                          >
+                            New Order
+                          </button>
+                          <button
+                            onClick={resetKioskSession}
+                            className="px-3 py-1.5 text-xs font-medium bg-slate-100 text-slate-700 rounded-lg hover:bg-slate-200 transition"
+                            title="Cancel and go back to home"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
+                      
                       <button 
                          onClick={() => setKioskVoiceEnabled(!kioskVoiceEnabled)}
                          className={`p-2 rounded-full transition-colors ${kioskVoiceEnabled ? 'bg-brand-100 text-brand-600' : 'bg-slate-100 text-slate-400 hover:bg-slate-200'}`}
