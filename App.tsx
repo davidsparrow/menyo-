@@ -414,11 +414,15 @@ function App() {
 
       const data = await response.json();
       
-      // Update menu context with synced menu
-      setProfile(prev => ({
-        ...prev,
-        menuContext: data.menuContext || prev.menuContext,
-      }));
+      // Update menu context and structured menu data
+      const updatedProfile = {
+        ...profile,
+        menuContext: data.menuContext || profile.menuContext,
+        menuData: data.menu || profile.menuData, // Store structured menu data
+      };
+      
+      setProfile(updatedProfile);
+      await saveProfile(updatedProfile);
 
       // Show success message
       alert('Menu synced successfully from Gloria Foods!');

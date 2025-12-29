@@ -1,5 +1,6 @@
-import { GoogleGenAI, LiveServerMessage, Modality } from "@google/genai";
+import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, FunctionDeclarationSchemaType } from "@google/genai";
 import { VoiceOption } from "../types";
+import type { GloriaFoodsMenu, GloriaFoodsMenuItem } from "./gloriaFoodsService";
 
 // Helper for Live API Audio in UI
 export const blobToBase64 = (blob: Blob): Promise<string> => {
@@ -164,6 +165,221 @@ export class GeminiService {
     } catch (error) {
       console.error("Error in chat bot:", error);
       return "Sorry, I'm having trouble processing your request right now.";
+    }
+  }
+
+  // 3b. Chat with Function Calling for Order Collection
+  async sendChatMessageWithFunctions(
+    history: { role: string; parts: { text: string }[] }[],
+    systemInstruction: string,
+    message: string,
+    menuData: GloriaFoodsMenu | null,
+    onFunctionCall: (functionName: string, args: any) => Promise<any>,
+    apiKey?: string
+  ): Promise<{ text: string; functionCalls?: Array<{ name: string; args: any; result: any }> }> {
+    try {
+      const ai = this.createAI(apiKey);
+      
+      // Define function declarations for order collection
+      const functionDeclarations: FunctionDeclaration[] = [
+        {
+          name: 'add_item_to_order',
+          description: 'Add a menu item to the customer\'s order. Use this when the customer wants to order something.',
+          parameters: {
+            type: FunctionDeclarationSchemaType.OBJECT,
+            properties: {
+              itemId: {
+                type: FunctionDeclarationSchemaType.STRING,
+                description: 'The ID of the menu item to add',
+              },
+              quantity: {
+                type: FunctionDeclarationSchemaType.NUMBER,
+                description: 'The quantity of this item (default: 1)',
+              },
+              modifiers: {
+                type: FunctionDeclarationSchemaType.ARRAY,
+                description: 'Optional array of modifier selections',
+                items: {
+                  type: FunctionDeclarationSchemaType.OBJECT,
+                  properties: {
+                    modifierId: { type: FunctionDeclarationSchemaType.STRING },
+                    optionId: { type: FunctionDeclarationSchemaType.STRING },
+                  },
+                },
+              },
+              specialInstructions: {
+                type: FunctionDeclarationSchemaType.STRING,
+                description: 'Special instructions for this specific item',
+              },
+            },
+            required: ['itemId', 'quantity'],
+          },
+        },
+        {
+          name: 'remove_item_from_order',
+          description: 'Remove an item from the customer\'s order',
+          parameters: {
+            type: FunctionDeclarationSchemaType.OBJECT,
+            properties: {
+              itemId: {
+                type: FunctionDeclarationSchemaType.STRING,
+                description: 'The ID of the menu item to remove',
+              },
+            },
+            required: ['itemId'],
+          },
+        },
+        {
+          name: 'update_item_quantity',
+          description: 'Update the quantity of an item in the order',
+          parameters: {
+            type: FunctionDeclarationSchemaType.OBJECT,
+            properties: {
+              itemId: {
+                type: FunctionDeclarationSchemaType.STRING,
+                description: 'The ID of the menu item',
+              },
+              quantity: {
+                type: FunctionDeclarationSchemaType.NUMBER,
+                description: 'The new quantity (remove if 0)',
+              },
+            },
+            required: ['itemId', 'quantity'],
+          },
+        },
+        {
+          name: 'set_customer_info',
+          description: 'Store customer information (name, phone, email)',
+          parameters: {
+            type: FunctionDeclarationSchemaType.OBJECT,
+            properties: {
+              name: {
+                type: FunctionDeclarationSchemaType.STRING,
+                description: 'Customer\'s full name',
+              },
+              phone: {
+                type: FunctionDeclarationSchemaType.STRING,
+                description: 'Customer\'s phone number',
+              },
+              email: {
+                type: FunctionDeclarationSchemaType.STRING,
+                description: 'Customer\'s email address (optional)',
+              },
+            },
+            required: ['name', 'phone'],
+          },
+        },
+        {
+          name: 'set_order_preferences',
+          description: 'Set order type and preferences (pickup/delivery, address, special instructions)',
+          parameters: {
+            type: FunctionDeclarationSchemaType.OBJECT,
+            properties: {
+              orderType: {
+                type: FunctionDeclarationSchemaType.STRING,
+                enum: ['PICKUP', 'DELIVERY'],
+                description: 'Whether this is a pickup or delivery order',
+              },
+              deliveryAddress: {
+                type: FunctionDeclarationSchemaType.STRING,
+                description: 'Delivery address (required for delivery orders)',
+              },
+              specialInstructions: {
+                type: FunctionDeclarationSchemaType.STRING,
+                description: 'Special instructions for the entire order',
+              },
+            },
+            required: ['orderType'],
+          },
+        },
+        {
+          name: 'get_menu_items',
+          description: 'Search or filter menu items by category, dietary restrictions, or keywords',
+          parameters: {
+            type: FunctionDeclarationSchemaType.OBJECT,
+            properties: {
+              category: {
+                type: FunctionDeclarationSchemaType.STRING,
+                description: 'Filter by category name (optional)',
+              },
+              filters: {
+                type: FunctionDeclarationSchemaType.ARRAY,
+                description: 'Filter by dietary restrictions or keywords (e.g., ["gluten-free", "vegetarian"])',
+                items: { type: FunctionDeclarationSchemaType.STRING },
+              },
+              limit: {
+                type: FunctionDeclarationSchemaType.NUMBER,
+                description: 'Maximum number of items to return (default: 6, can request more)',
+              },
+            },
+          },
+        },
+        {
+          name: 'get_menu_item_details',
+          description: 'Get detailed information about a specific menu item including modifiers and options',
+          parameters: {
+            type: FunctionDeclarationSchemaType.OBJECT,
+            properties: {
+              itemId: {
+                type: FunctionDeclarationSchemaType.STRING,
+                description: 'The ID of the menu item',
+              },
+            },
+            required: ['itemId'],
+          },
+        },
+      ];
+
+      const chat = ai.chats.create({
+        model: 'gemini-2.5-flash',
+        config: {
+          systemInstruction: systemInstruction,
+          tools: [{ functionDeclarations }],
+          functionCallingConfig: { mode: 'AUTO' },
+        },
+        history: history,
+      });
+
+      const response = await chat.sendMessage({ message: message });
+      const functionCalls: Array<{ name: string; args: any; result: any }> = [];
+
+      // Check for function calls in response
+      const candidates = response.candidates || [];
+      for (const candidate of candidates) {
+        const content = candidate.content;
+        if (content?.parts) {
+          for (const part of content.parts) {
+            if (part.functionCall) {
+              const functionName = part.functionCall.name;
+              const args = part.functionCall.args || {};
+              
+              // Call the handler function
+              const result = await onFunctionCall(functionName, args);
+              
+              functionCalls.push({ name: functionName, args, result });
+              
+              // Send function result back to the model
+              await chat.sendMessage({
+                parts: [{
+                  functionResponse: {
+                    name: functionName,
+                    response: result,
+                  },
+                }],
+              });
+            }
+          }
+        }
+      }
+
+      // Get final text response
+      const finalResponse = await chat.sendMessage({ message: "Continue the conversation naturally." });
+      const text = finalResponse.text || "I didn't catch that.";
+
+      return { text, functionCalls: functionCalls.length > 0 ? functionCalls : undefined };
+    } catch (error) {
+      console.error("Error in chat bot with functions:", error);
+      return { text: "Sorry, I'm having trouble processing your request right now." };
     }
   }
 

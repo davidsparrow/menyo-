@@ -182,6 +182,7 @@ export interface RestaurantProfile {
   id: string;
   info: BusinessInfo;
   menuContext: string; // The raw text extracted/summarized from menus for the AI
+  menuData?: any; // Structured menu data (JSON) - type: GloriaFoodsMenu from gloriaFoodsService
   integrations: IntegrationStatus;
   voiceId: string; // Gemini voice name
   phoneNumber: string | null;
