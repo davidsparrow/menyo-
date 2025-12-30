@@ -1,4 +1,4 @@
-import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration, FunctionDeclarationSchemaType } from "@google/genai";
+import { GoogleGenAI, LiveServerMessage, Modality, FunctionDeclaration } from "@google/genai";
 import { VoiceOption } from "../types";
 import type { GloriaFoodsMenu, GloriaFoodsMenuItem } from "./gloriaFoodsService";
 
@@ -186,29 +186,29 @@ export class GeminiService {
           name: 'add_item_to_order',
           description: 'Add a menu item to the customer\'s order. Use this when the customer wants to order something.',
           parameters: {
-            type: FunctionDeclarationSchemaType.OBJECT,
+            type: "object",
             properties: {
               itemId: {
-                type: FunctionDeclarationSchemaType.STRING,
+                type: "string",
                 description: 'The ID of the menu item to add',
               },
               quantity: {
-                type: FunctionDeclarationSchemaType.NUMBER,
+                type: "number",
                 description: 'The quantity of this item (default: 1)',
               },
               modifiers: {
-                type: FunctionDeclarationSchemaType.ARRAY,
+                type: "array",
                 description: 'Optional array of modifier selections',
                 items: {
-                  type: FunctionDeclarationSchemaType.OBJECT,
+                  type: "object",
                   properties: {
-                    modifierId: { type: FunctionDeclarationSchemaType.STRING },
-                    optionId: { type: FunctionDeclarationSchemaType.STRING },
+                    modifierId: { type: "string" },
+                    optionId: { type: "string" },
                   },
                 },
               },
               specialInstructions: {
-                type: FunctionDeclarationSchemaType.STRING,
+                type: "string",
                 description: 'Special instructions for this specific item',
               },
             },
@@ -219,10 +219,10 @@ export class GeminiService {
           name: 'remove_item_from_order',
           description: 'Remove an item from the customer\'s order',
           parameters: {
-            type: FunctionDeclarationSchemaType.OBJECT,
+            type: "object",
             properties: {
               itemId: {
-                type: FunctionDeclarationSchemaType.STRING,
+                type: "string",
                 description: 'The ID of the menu item to remove',
               },
             },
@@ -233,14 +233,14 @@ export class GeminiService {
           name: 'update_item_quantity',
           description: 'Update the quantity of an item in the order',
           parameters: {
-            type: FunctionDeclarationSchemaType.OBJECT,
+            type: "object",
             properties: {
               itemId: {
-                type: FunctionDeclarationSchemaType.STRING,
+                type: "string",
                 description: 'The ID of the menu item',
               },
               quantity: {
-                type: FunctionDeclarationSchemaType.NUMBER,
+                type: "number",
                 description: 'The new quantity (remove if 0)',
               },
             },
@@ -251,18 +251,18 @@ export class GeminiService {
           name: 'set_customer_info',
           description: 'Store customer information (name, phone, email)',
           parameters: {
-            type: FunctionDeclarationSchemaType.OBJECT,
+            type: "object",
             properties: {
               name: {
-                type: FunctionDeclarationSchemaType.STRING,
+                type: "string",
                 description: 'Customer\'s full name',
               },
               phone: {
-                type: FunctionDeclarationSchemaType.STRING,
+                type: "string",
                 description: 'Customer\'s phone number',
               },
               email: {
-                type: FunctionDeclarationSchemaType.STRING,
+                type: "string",
                 description: 'Customer\'s email address (optional)',
               },
             },
@@ -273,19 +273,19 @@ export class GeminiService {
           name: 'set_order_preferences',
           description: 'Set order type and preferences (pickup/delivery, address, special instructions)',
           parameters: {
-            type: FunctionDeclarationSchemaType.OBJECT,
+            type: "object",
             properties: {
               orderType: {
-                type: FunctionDeclarationSchemaType.STRING,
+                type: "string",
                 enum: ['PICKUP', 'DELIVERY'],
                 description: 'Whether this is a pickup or delivery order',
               },
               deliveryAddress: {
-                type: FunctionDeclarationSchemaType.STRING,
+                type: "string",
                 description: 'Delivery address (required for delivery orders)',
               },
               specialInstructions: {
-                type: FunctionDeclarationSchemaType.STRING,
+                type: "string",
                 description: 'Special instructions for the entire order',
               },
             },
@@ -296,19 +296,19 @@ export class GeminiService {
           name: 'get_menu_items',
           description: 'Search or filter menu items by category, dietary restrictions, or keywords',
           parameters: {
-            type: FunctionDeclarationSchemaType.OBJECT,
+            type: "object",
             properties: {
               category: {
-                type: FunctionDeclarationSchemaType.STRING,
+                type: "string",
                 description: 'Filter by category name (optional)',
               },
               filters: {
-                type: FunctionDeclarationSchemaType.ARRAY,
+                type: "array",
                 description: 'Filter by dietary restrictions or keywords (e.g., ["gluten-free", "vegetarian"])',
-                items: { type: FunctionDeclarationSchemaType.STRING },
+                items: { type: "string" },
               },
               limit: {
-                type: FunctionDeclarationSchemaType.NUMBER,
+                type: "number",
                 description: 'Maximum number of items to return (default: 6, can request more)',
               },
             },
@@ -318,10 +318,10 @@ export class GeminiService {
           name: 'get_menu_item_details',
           description: 'Get detailed information about a specific menu item including modifiers and options',
           parameters: {
-            type: FunctionDeclarationSchemaType.OBJECT,
+            type: "object",
             properties: {
               itemId: {
-                type: FunctionDeclarationSchemaType.STRING,
+                type: "string",
                 description: 'The ID of the menu item',
               },
             },

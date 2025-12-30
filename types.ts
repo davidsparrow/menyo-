@@ -25,6 +25,9 @@ export interface IntegrationStatus {
 
 export type BookingPreference = 'HUMAN_SUPPORT' | 'GLORIA_FOODS' | 'CUSTOM';
 
+export type OrderHandlingMode = 'EMAIL_ONLY' | 'GLORIA_FOOD';
+export type ReservationHandlingMode = 'EMAIL_ONLY' | 'GOOGLE_CALENDAR';
+
 export interface Policies {
   dietaryRestrictions: string;
   kidsZone: string;
@@ -190,7 +193,24 @@ export interface RestaurantProfile {
   gloriaFoodsRestaurantId?: string; // GF restaurant_id for webhook matching
   gloriaFoodsOrderMethod?: 'HYBRID' | 'PUSH'; // Order submission method preference
   ownerEmail?: string; // Restaurant owner email for notifications
-  
+
+  // Order Handling Configuration
+  orderHandlingMode: OrderHandlingMode; // EMAIL_ONLY or GLORIA_FOOD
+  emailOrderSettings?: {
+    deliveryEmail: string;
+    enableDineIn: boolean;
+    enablePickup: boolean;
+    enableDelivery: boolean;
+    autoReplyMessage?: string;
+  };
+
+  // Reservation Handling (Path A only)
+  reservationHandlingMode?: ReservationHandlingMode; // EMAIL_ONLY or GOOGLE_CALENDAR
+  emailReservationSettings?: {
+    deliveryEmail: string;
+    autoReplyMessage?: string;
+  };
+
   // New Knowledge Base Fields
   bookingPreference: BookingPreference;
   customBookingUrl?: string;

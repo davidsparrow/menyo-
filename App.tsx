@@ -20,7 +20,9 @@ function App() {
   const [gloriaInput, setGloriaInput] = useState('');
   
   // Settings State
-  const [settingsTab, setSettingsTab] = useState<'KNOWLEDGE' | 'VOICE' | 'PHONE' | 'APPS' | 'SECURITY' | 'RESERVATIONS'>('KNOWLEDGE');
+  const [settingsTab, setSettingsTab] = useState<'KNOWLEDGE' | 'VOICE' | 'PHONE' | 'APPS' | 'SECURITY' | 'RESERVATIONS' | 'ORDER_MODE'>('KNOWLEDGE');
+  const [showPathSwitchModal, setShowPathSwitchModal] = useState(false);
+  const [targetPath, setTargetPath] = useState<'EMAIL_ONLY' | 'GLORIA_FOOD'>('EMAIL_ONLY');
   const [chatMessage, setChatMessage] = useState('');
   const [chatHistory, setChatHistory] = useState<{role: 'user' | 'assistant', text: string}[]>([
     { role: 'assistant', text: "Hi! I'm your Knowledge Base Assistant. Tell me what needs to change—like 'We no longer allow dogs' or 'We are closed on Mondays'—and I'll update your settings automatically." }
@@ -113,7 +115,20 @@ function App() {
     phoneNumber: null,
     gloriaFoodsOrderMethod: 'HYBRID' as 'HYBRID' | 'PUSH',
     ownerEmail: undefined,
-    
+
+    // Order Handling Mode (defaults to Email-Only for new restaurants)
+    orderHandlingMode: 'EMAIL_ONLY',
+    emailOrderSettings: {
+      deliveryEmail: '',
+      enableDineIn: true,
+      enablePickup: true,
+      enableDelivery: true,
+    },
+    reservationHandlingMode: 'EMAIL_ONLY',
+    emailReservationSettings: {
+      deliveryEmail: '',
+    },
+
     // New Fields defaults
     bookingPreference: 'GLORIA_FOODS',
     policies: {
@@ -230,7 +245,36 @@ function App() {
               .single();
             
             if (restaurant?.profile_data) {
-              setProfile(restaurant.profile_data as RestaurantProfile);
+              let loadedProfile = restaurant.profile_data as RestaurantProfile;
+
+              // MIGRATION: Auto-assign orderHandlingMode if not set
+              if (!loadedProfile.orderHandlingMode) {
+                if (loadedProfile.integrations?.gloriaFoodsOrders) {
+                  // Existing GloriaFood restaurant → Path B
+                  loadedProfile.orderHandlingMode = 'GLORIA_FOOD';
+                } else {
+                  // New or non-GloriaFood restaurant → Path A (Email-Only)
+                  loadedProfile.orderHandlingMode = 'EMAIL_ONLY';
+                  loadedProfile.emailOrderSettings = {
+                    deliveryEmail: loadedProfile.ownerEmail || '',
+                    enableDineIn: true,
+                    enablePickup: true,
+                    enableDelivery: true,
+                  };
+                }
+
+                // Save migrated profile
+                try {
+                  await supabase
+                    .from('restaurants')
+                    .update({ profile_data: loadedProfile })
+                    .eq('user_id', user.id);
+                } catch (error) {
+                  console.error('Error saving migrated profile:', error);
+                }
+              }
+
+              setProfile(loadedProfile);
             }
           } catch (error) {
             console.error('Error loading profile:', error);
@@ -692,8 +736,35 @@ function App() {
       bookingInstructions = `- For all reservation requests, please transfer them to the human host or provide the phone number: ${p.humanSupportPhone || p.info.phone}.`;
     }
 
-    const orderInstructions = p.integrations.gloriaFoodsOrders 
-      ? `- When a customer wants to place an order, use the available functions to collect structured order data:
+    // Generate order instructions based on order handling mode
+    let orderInstructions = '';
+    if (p.orderHandlingMode === 'EMAIL_ONLY') {
+      // Path A: Email-Only mode - NO function calling, conversational collection
+      const enabledOrderTypes = [];
+      if (p.emailOrderSettings?.enableDineIn) enabledOrderTypes.push('dine-in');
+      if (p.emailOrderSettings?.enablePickup) enabledOrderTypes.push('pickup');
+      if (p.emailOrderSettings?.enableDelivery) enabledOrderTypes.push('delivery');
+
+      orderInstructions = `- When a customer wants to place an order, collect their information naturally in conversation:
+  1. Ask what items they'd like to order (be helpful with menu suggestions from the menu context above)
+  2. Collect their full name
+  3. Collect their phone number
+  4. Ask if they want ${enabledOrderTypes.join(', or ')}
+  ${p.emailOrderSettings?.enableDelivery ? '5. If delivery, collect their delivery address' : ''}
+  ${p.emailOrderSettings?.enableDelivery ? '6. Ask about any special instructions or dietary requirements' : '5. Ask about any special instructions or dietary requirements'}
+  7. Once you have all the information, summarize the complete order back to them:
+     "Let me confirm: You'd like [items] for [dine-in/pickup/delivery]. Your name is [name] and phone is [phone]. ${p.emailOrderSettings?.enableDelivery ? 'Delivery address: [address]. ' : ''}Is that correct?"
+  8. When they confirm, say: "Perfect! We've received your order and it's been sent to our kitchen. We'll contact you shortly at [phone] to confirm and arrange ${p.emailOrderSettings?.enableDelivery ? 'delivery' : p.emailOrderSettings?.enablePickup ? 'pickup' : 'your table'}. No payment is needed at this time - we'll discuss that when we call you."
+- Be friendly, patient, and conversational - this is about building a relationship with the customer.
+- NO payment processing is required - orders are confirmed manually by the restaurant.
+- DO NOT use any function calling for orders - collect all information through natural conversation.
+- IMPORTANT: If you see "NEW CUSTOMER" or "FRESH ORDER" in the context, this is a completely new customer.
+  Completely forget any previous conversations, order details, or customer preferences.
+  Do NOT reference previous orders, previous customers, or assume anything about this customer's preferences.
+  Each customer is different - start fresh and help this new customer from the beginning.`;
+    } else if (p.orderHandlingMode === 'GLORIA_FOOD') {
+      // Path B: GloriaFood mode - Function calling for structured order data
+      orderInstructions = `- When a customer wants to place an order, use the available functions to collect structured order data:
   1. Use 'get_menu_items' to show menu items when customer asks "what's on the menu" or wants to see options
   2. Use 'add_item_to_order' when customer wants to order something - call this function immediately when they mention an item
   3. Use 'set_customer_info' to collect their name and phone number
@@ -710,9 +781,12 @@ function App() {
 - Be patient and helpful - guide customers through the ordering process naturally.
 - IMPORTANT: If you see "NEW CUSTOMER" or "FRESH ORDER" in the context, this is a completely new customer.
   Completely forget any previous conversations, order details, or customer preferences.
-  Do NOT reference previous orders, previous customers, or assume anything about this customer's preferences.
-  Each customer is different - start fresh and help this new customer from the beginning.`
-      : `- For takeout orders, please ask them to call ${p.humanSupportPhone || p.info.phone} or visit our website at ${p.info.website || 'our website'}.`;
+  DO NOT reference previous orders, previous customers, or assume anything about this customer's preferences.
+  Each customer is different - start fresh and help this new customer from the beginning.`;
+    } else {
+      // Fallback: No ordering enabled
+      orderInstructions = `- For takeout orders, please ask them to call ${p.humanSupportPhone || p.info.phone} or visit our website at ${p.info.website || 'our website'}.`;
+    }
 
     const prompt = `You are an AI Voice Assistant for ${p.info.name}, a ${p.info.cuisine} restaurant located at ${p.info.address}.
 Your voice should be friendly, professional, and efficient.
@@ -1191,8 +1265,12 @@ ${orderInstructions}
         return;
       }
 
-      // Call API to prepare order
-      const response = await fetch('/api/gloria-foods/orders', {
+      // Route to the correct endpoint based on order handling mode
+      const endpoint = profile.orderHandlingMode === 'EMAIL_ONLY'
+        ? '/api/orders/email'
+        : '/api/gloria-foods/orders';
+
+      const response = await fetch(endpoint, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${session.access_token}`,
@@ -1201,6 +1279,7 @@ ${orderInstructions}
         body: JSON.stringify({
           customerName,
           phone: phone || '000-000-0000', // Fallback if not provided
+          email: orderState.email,
           items,
           orderType: orderState.orderType || 'PICKUP',
           deliveryAddress: orderState.deliveryAddress,
@@ -1214,35 +1293,56 @@ ${orderInstructions}
       }
 
       const data = await response.json();
-      
-      // Check if PUSH method (order confirmed immediately) or HYBRID (needs checkout)
-      if (data.order.method === 'PUSH' && data.order.status === 'CONFIRMED') {
-        // PUSH method: Show order confirmation
+
+      // Handle response based on order handling mode
+      if (profile.orderHandlingMode === 'EMAIL_ONLY') {
+        // Email-Only mode: Show immediate confirmation (no payment)
         setConfirmedOrder({
           orderId: data.order.orderId,
           customerName: customerName || 'Guest',
-          total: data.order.total,
-          estimatedReadyTime: data.order.estimatedReadyTime,
-          orderType: 'PICKUP', // Could be extracted from conversation
+          total: 0, // No payment in email mode
+          estimatedReadyTime: undefined,
+          orderType: orderState.orderType || 'PICKUP',
           status: 'CONFIRMED',
           phone: phone || undefined,
-          email: extractFromConversation(conversationText, ['email']) || undefined,
+          email: orderState.email,
         });
-        
+
         // Add message to chat
         setKioskChatHistory(prev => [...prev, {
           role: 'model',
-          text: `Great! Your order #${data.order.orderId} has been confirmed! You'll see a confirmation screen with all the details.`
+          text: `Perfect! Your order has been received and sent to our team. We'll contact you at ${phone} shortly to confirm and arrange ${orderState.orderType === 'DELIVERY' ? 'delivery' : orderState.orderType === 'PICKUP' ? 'pickup' : 'your table'}. No payment is needed at this time.`
         }]);
       } else {
-        // HYBRID method: Show checkout URL
-        setPendingOrderCheckoutUrl(data.order.checkoutUrl);
-        
-        // Add message to chat
-        setKioskChatHistory(prev => [...prev, {
-          role: 'model',
-          text: `Your order is ready! Click the button below to complete payment securely.`
-        }]);
+        // GloriaFood mode: Check if PUSH method (order confirmed immediately) or HYBRID (needs checkout)
+        if (data.order.method === 'PUSH' && data.order.status === 'CONFIRMED') {
+          // PUSH method: Show order confirmation
+          setConfirmedOrder({
+            orderId: data.order.orderId,
+            customerName: customerName || 'Guest',
+            total: data.order.total,
+            estimatedReadyTime: data.order.estimatedReadyTime,
+            orderType: 'PICKUP', // Could be extracted from conversation
+            status: 'CONFIRMED',
+            phone: phone || undefined,
+            email: orderState.email,
+          });
+
+          // Add message to chat
+          setKioskChatHistory(prev => [...prev, {
+            role: 'model',
+            text: `Great! Your order #${data.order.orderId} has been confirmed! You'll see a confirmation screen with all the details.`
+          }]);
+        } else {
+          // HYBRID method: Show checkout URL
+          setPendingOrderCheckoutUrl(data.order.checkoutUrl);
+
+          // Add message to chat
+          setKioskChatHistory(prev => [...prev, {
+            role: 'model',
+            text: `Your order is ready! Click the button below to complete payment securely.`
+          }]);
+        }
       }
 
     } catch (error: any) {
@@ -1452,7 +1552,120 @@ ${orderInstructions}
 
 
   // --- Render Steps (Wizard) ---
- 
+
+  const renderStep0_PathSelection = () => (
+    <div className="space-y-8">
+      <div className="text-center">
+        <h2 className="text-3xl font-bold text-slate-900 mb-3">How do you want to handle orders?</h2>
+        <p className="text-slate-600 text-lg">Choose the approach that best fits your restaurant</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6 mt-12">
+        {/* Path A - Email Only */}
+        <button
+          onClick={() => {
+            setProfile(prev => ({
+              ...prev,
+              orderHandlingMode: 'EMAIL_ONLY',
+              emailOrderSettings: {
+                deliveryEmail: prev.ownerEmail || '',
+                enableDineIn: true,
+                enablePickup: true,
+                enableDelivery: true,
+              },
+              reservationHandlingMode: 'EMAIL_ONLY',
+              emailReservationSettings: {
+                deliveryEmail: prev.ownerEmail || '',
+              },
+            }));
+            setStep(1);
+          }}
+          className="group p-8 border-2 border-slate-200 rounded-2xl hover:border-green-500 hover:bg-green-50 transition-all text-left relative overflow-hidden transform hover:scale-105 duration-200"
+        >
+          <div className="absolute top-4 right-4 bg-green-100 text-green-700 px-3 py-1 rounded-full text-xs font-bold">
+            Recommended for beginners
+          </div>
+          <div className="bg-green-100 w-16 h-16 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+            <Mail className="w-8 h-8 text-green-600" />
+          </div>
+          <h3 className="text-2xl font-bold text-slate-900 mb-3">Quickstart (Email-Only)</h3>
+          <p className="text-slate-600 mb-6">Perfect for getting started quickly</p>
+          <ul className="space-y-3 text-sm text-slate-700">
+            <li className="flex items-start gap-2">
+              <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              <span>Orders sent to your email</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              <span>No payment processing</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              <span>No POS integration required</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              <span>Dine-in, pickup & delivery supported</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5" />
+              <span>5-minute setup</span>
+            </li>
+          </ul>
+        </button>
+
+        {/* Path B - GloriaFood */}
+        <button
+          onClick={() => {
+            setProfile(prev => ({
+              ...prev,
+              orderHandlingMode: 'GLORIA_FOOD',
+            }));
+            setStep(1);
+          }}
+          className="group p-8 border-2 border-slate-200 rounded-2xl hover:border-orange-500 hover:bg-orange-50 transition-all text-left relative overflow-hidden transform hover:scale-105 duration-200"
+        >
+          <div className="absolute top-4 right-4 bg-orange-100 text-orange-700 px-3 py-1 rounded-full text-xs font-bold">
+            For established restaurants
+          </div>
+          <div className="bg-orange-100 w-16 h-16 rounded-full flex items-center justify-center mb-6 group-hover:scale-110 transition-transform">
+            <ShoppingBag className="w-8 h-8 text-orange-600" />
+          </div>
+          <h3 className="text-2xl font-bold text-slate-900 mb-3">GloriaFood Integration</h3>
+          <p className="text-slate-600 mb-6">Full POS integration with payment processing</p>
+          <ul className="space-y-3 text-sm text-slate-700">
+            <li className="flex items-start gap-2">
+              <Check className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" />
+              <span>Online payments</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" />
+              <span>Menu sync from GloriaFood</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" />
+              <span>Order tracking & status updates</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" />
+              <span>Advanced modifiers & options</span>
+            </li>
+            <li className="flex items-start gap-2">
+              <Check className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" />
+              <span>Requires GloriaFood account</span>
+            </li>
+          </ul>
+        </button>
+      </div>
+
+      <div className="mt-8 text-center">
+        <p className="text-sm text-slate-500">
+          Not sure which to choose? Start with Email-Only and upgrade to GloriaFood later in Settings.
+        </p>
+      </div>
+    </div>
+  );
+
   const renderStep1_Menu = () => (
     <div className="space-y-8">
       <div>
@@ -1585,7 +1798,185 @@ ${orderInstructions}
     </div>
   );
 
-  const renderStep3_Integrations = () => (
+  const renderStep3_EmailSetup = () => (
+    <div className="space-y-8">
+      <div>
+        <h2 className="text-3xl font-bold text-slate-900 mb-2">Email Order Setup</h2>
+        <p className="text-slate-500 text-lg">Configure where to receive orders and reservations.</p>
+      </div>
+
+      <div className="space-y-6">
+        {/* Email Address Configuration */}
+        <div className="bg-white p-6 rounded-2xl border-2 border-green-200 shadow-sm">
+          <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+            <Mail className="w-5 h-5 text-green-600" /> Email Settings
+          </h3>
+
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-bold text-slate-700 mb-2">
+                Email for Orders & Reservations
+              </label>
+              <input
+                type="email"
+                value={profile.emailOrderSettings?.deliveryEmail || ''}
+                onChange={(e) => {
+                  const updated: RestaurantProfile = {
+                    ...profile,
+                    emailOrderSettings: {
+                      ...(profile.emailOrderSettings || { enableDineIn: true, enablePickup: true, enableDelivery: true }),
+                      deliveryEmail: e.target.value
+                    },
+                    emailReservationSettings: {
+                      ...(profile.emailReservationSettings || {}),
+                      deliveryEmail: e.target.value
+                    }
+                  };
+                  setProfile(updated);
+                }}
+                placeholder="orders@restaurant.com"
+                className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-green-500"
+              />
+              <p className="text-xs text-slate-500 mt-2">
+                All orders and reservation requests will be sent to this email address
+              </p>
+            </div>
+
+            {/* Order Type Toggles */}
+            <div className="bg-slate-50 p-4 rounded-lg border border-slate-200">
+              <label className="block text-sm font-bold text-slate-700 mb-3">
+                Enabled Order Types
+              </label>
+              <div className="space-y-2">
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={profile.emailOrderSettings?.enableDineIn ?? true}
+                    onChange={(e) => {
+                      const updated: RestaurantProfile = {
+                        ...profile,
+                        emailOrderSettings: {
+                          ...(profile.emailOrderSettings || { deliveryEmail: '', enablePickup: true, enableDelivery: true }),
+                          enableDineIn: e.target.checked
+                        }
+                      };
+                      setProfile(updated);
+                    }}
+                    className="w-4 h-4 text-green-600 rounded"
+                  />
+                  <span className="text-sm text-slate-700">Dine-In Orders</span>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={profile.emailOrderSettings?.enablePickup ?? true}
+                    onChange={(e) => {
+                      const updated: RestaurantProfile = {
+                        ...profile,
+                        emailOrderSettings: {
+                          ...(profile.emailOrderSettings || { deliveryEmail: '', enableDineIn: true, enableDelivery: true }),
+                          enablePickup: e.target.checked
+                        }
+                      };
+                      setProfile(updated);
+                    }}
+                    className="w-4 h-4 text-green-600 rounded"
+                  />
+                  <span className="text-sm text-slate-700">Pickup Orders</span>
+                </label>
+                <label className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={profile.emailOrderSettings?.enableDelivery ?? true}
+                    onChange={(e) => {
+                      const updated: RestaurantProfile = {
+                        ...profile,
+                        emailOrderSettings: {
+                          ...(profile.emailOrderSettings || { deliveryEmail: '', enableDineIn: true, enablePickup: true }),
+                          enableDelivery: e.target.checked
+                        }
+                      };
+                      setProfile(updated);
+                    }}
+                    className="w-4 h-4 text-green-600 rounded"
+                  />
+                  <span className="text-sm text-slate-700">Delivery Orders</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Reservation Handling Choice */}
+        <div className="bg-white p-6 rounded-2xl border-2 border-blue-200 shadow-sm">
+          <h3 className="text-lg font-bold text-slate-900 mb-4 flex items-center gap-2">
+            <Calendar className="w-5 h-5 text-blue-600" /> Reservation Handling
+          </h3>
+
+          <p className="text-sm text-slate-600 mb-4">
+            How do you want to handle reservation requests?
+          </p>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <button
+              onClick={() => {
+                const updated: RestaurantProfile = {
+                  ...profile,
+                  reservationHandlingMode: 'EMAIL_ONLY',
+                  emailReservationSettings: {
+                    deliveryEmail: profile.emailOrderSettings?.deliveryEmail || '',
+                  }
+                };
+                setProfile(updated);
+              }}
+              className={`p-4 border-2 rounded-lg text-left transition-all ${
+                profile.reservationHandlingMode === 'EMAIL_ONLY'
+                  ? 'border-green-500 bg-green-50'
+                  : 'border-slate-200 hover:border-green-300'
+              }`}
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <Mail className="w-5 h-5 text-green-600" />
+                <span className="font-bold text-slate-900">Send to Email</span>
+              </div>
+              <p className="text-xs text-slate-600">
+                Reservation requests sent to your email for manual confirmation
+              </p>
+            </button>
+
+            <button
+              onClick={() => {
+                const updated: RestaurantProfile = {
+                  ...profile,
+                  reservationHandlingMode: 'GOOGLE_CALENDAR',
+                  integrations: {
+                    ...profile.integrations,
+                    googleCalendar: true
+                  }
+                };
+                setProfile(updated);
+              }}
+              className={`p-4 border-2 rounded-lg text-left transition-all ${
+                profile.reservationHandlingMode === 'GOOGLE_CALENDAR'
+                  ? 'border-blue-500 bg-blue-50'
+                  : 'border-slate-200 hover:border-blue-300'
+              }`}
+            >
+              <div className="flex items-center gap-3 mb-2">
+                <Calendar className="w-5 h-5 text-blue-600" />
+                <span className="font-bold text-slate-900">Google Calendar Sync</span>
+              </div>
+              <p className="text-xs text-slate-600">
+                Automatically sync reservations with Google Calendar
+              </p>
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+
+  const renderStep3_GloriaFoodSetup = () => (
     <div className="space-y-8">
       <div>
         <h2 className="text-3xl font-bold text-slate-900 mb-2">Platform Integrations</h2>
@@ -1870,6 +2261,15 @@ ${orderInstructions}
       </div>
     </div>
   );
+
+  // Branching wrapper for Step 3
+  const renderStep3_Integrations = () => {
+    if (profile.orderHandlingMode === 'EMAIL_ONLY') {
+      return renderStep3_EmailSetup();
+    } else {
+      return renderStep3_GloriaFoodSetup();
+    }
+  };
 
   const renderStep4_KnowledgeBase = () => (
     <div className="space-y-8 h-full flex flex-col">
@@ -2819,7 +3219,24 @@ ${orderInstructions}
     <div className="max-w-7xl mx-auto py-8 px-6 h-full flex flex-col">
        <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-3xl font-bold text-slate-900">Settings & Configuration</h1>
+            <div className="flex items-center gap-3 mb-2">
+              <h1 className="text-3xl font-bold text-slate-900">Settings & Configuration</h1>
+              <span className={`px-3 py-1 rounded-full text-xs font-bold ${
+                profile.orderHandlingMode === 'EMAIL_ONLY'
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-orange-100 text-orange-700'
+              }`}>
+                {profile.orderHandlingMode === 'EMAIL_ONLY' ? (
+                  <span className="flex items-center gap-1.5">
+                    <Mail className="w-3.5 h-3.5" /> Email Orders
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1.5">
+                    <ShoppingBag className="w-3.5 h-3.5" /> GloriaFood
+                  </span>
+                )}
+              </span>
+            </div>
             <p className="text-slate-500">Manage your agent's behavior, voice, and connection.</p>
           </div>
           <button onClick={() => setView('DASHBOARD')} className="p-2 hover:bg-slate-100 rounded-full">
@@ -2860,11 +3277,17 @@ ${orderInstructions}
             >
               <Plug className="w-5 h-5" /> Connected Apps
             </button>
-            <button 
+            <button
               onClick={() => setSettingsTab('SECURITY')}
               className={`w-full text-left p-4 rounded-xl font-medium transition-colors flex items-center gap-3 ${settingsTab === 'SECURITY' ? 'bg-white shadow-sm text-brand-700 ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/50'}`}
             >
               <ShieldCheck className="w-5 h-5" /> Security
+            </button>
+            <button
+              onClick={() => setSettingsTab('ORDER_MODE')}
+              className={`w-full text-left p-4 rounded-xl font-medium transition-colors flex items-center gap-3 ${settingsTab === 'ORDER_MODE' ? 'bg-white shadow-sm text-brand-700 ring-1 ring-slate-200' : 'text-slate-600 hover:bg-white/50'}`}
+            >
+              <ShoppingBag className="w-5 h-5" /> Order Handling
             </button>
           </div>
 
@@ -3026,7 +3449,7 @@ ${orderInstructions}
              {settingsTab === 'SECURITY' && (
                <div className="p-8 max-w-2xl">
                   <h3 className="text-xl font-bold text-slate-900 mb-6">Security & Access Control</h3>
-                  
+
                   <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 mb-6">
                      <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
                         <Lock className="w-5 h-5 text-slate-500" /> Admin Password
@@ -3034,11 +3457,11 @@ ${orderInstructions}
                      <p className="text-sm text-slate-500 mb-4">
                        This password is required to exit Kiosk Mode.
                      </p>
-                     
+
                      <div>
                         <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Current Password</label>
-                        <input 
-                           type="text" 
+                        <input
+                           type="text"
                            value={profile.adminPassword || ''}
                            onChange={(e) => setProfile(p => ({...p, adminPassword: e.target.value}))}
                            className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-900"
@@ -3048,8 +3471,414 @@ ${orderInstructions}
                </div>
              )}
 
+             {settingsTab === 'ORDER_MODE' && (
+               <div className="p-8 max-w-3xl">
+                  <div className="flex justify-between items-start mb-6">
+                     <div>
+                        <h3 className="text-xl font-bold text-slate-900 mb-2">Order Handling Mode</h3>
+                        <p className="text-sm text-slate-500">Choose how your restaurant processes orders</p>
+                     </div>
+                     <span className={`px-4 py-2 rounded-full text-sm font-bold ${
+                       profile.orderHandlingMode === 'EMAIL_ONLY'
+                         ? 'bg-green-100 text-green-700 ring-2 ring-green-200'
+                         : 'bg-orange-100 text-orange-700 ring-2 ring-orange-200'
+                     }`}>
+                        {profile.orderHandlingMode === 'EMAIL_ONLY' ? (
+                          <span className="flex items-center gap-2">
+                            <Mail className="w-4 h-4" /> Email-Only Mode
+                          </span>
+                        ) : (
+                          <span className="flex items-center gap-2">
+                            <ShoppingBag className="w-4 h-4" /> GloriaFood Mode
+                          </span>
+                        )}
+                     </span>
+                  </div>
+
+                  {/* Current Mode Details */}
+                  <div className={`p-6 rounded-xl border-2 mb-6 ${
+                    profile.orderHandlingMode === 'EMAIL_ONLY'
+                      ? 'bg-green-50 border-green-200'
+                      : 'bg-orange-50 border-orange-200'
+                  }`}>
+                     {profile.orderHandlingMode === 'EMAIL_ONLY' ? (
+                        <>
+                           <div className="flex items-start gap-3 mb-4">
+                              <Mail className="w-6 h-6 text-green-600 flex-shrink-0 mt-0.5" />
+                              <div>
+                                 <h4 className="font-bold text-green-900 mb-2">Email-Only Orders</h4>
+                                 <p className="text-sm text-green-700 mb-3">
+                                    Orders are sent directly to your email. No payment processing, no POS integration required.
+                                 </p>
+                                 <ul className="text-sm text-green-700 space-y-1">
+                                    <li>✓ Quick 5-minute setup</li>
+                                    <li>✓ Orders sent via email notification</li>
+                                    <li>✓ No payment processing fees</li>
+                                    <li>✓ Manual confirmation required</li>
+                                 </ul>
+                              </div>
+                           </div>
+                        </>
+                     ) : (
+                        <>
+                           <div className="flex items-start gap-3 mb-4">
+                              <ShoppingBag className="w-6 h-6 text-orange-600 flex-shrink-0 mt-0.5" />
+                              <div>
+                                 <h4 className="font-bold text-orange-900 mb-2">GloriaFood Integration</h4>
+                                 <p className="text-sm text-orange-700 mb-3">
+                                    Full POS integration with online payment processing and menu sync.
+                                 </p>
+                                 <ul className="text-sm text-orange-700 space-y-1">
+                                    <li>✓ Automatic menu synchronization</li>
+                                    <li>✓ Online payment processing</li>
+                                    <li>✓ Order management dashboard</li>
+                                    <li>✓ Real-time order tracking</li>
+                                 </ul>
+                              </div>
+                           </div>
+                        </>
+                     )}
+                  </div>
+
+                  {/* Mode-Specific Settings */}
+                  {profile.orderHandlingMode === 'EMAIL_ONLY' && (
+                     <div className="bg-white p-6 rounded-xl border border-slate-200 mb-6">
+                        <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                           <Mail className="w-5 h-5 text-slate-500" /> Email Settings
+                        </h4>
+
+                        <div className="space-y-4">
+                           <div>
+                              <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Delivery Email Address</label>
+                              <p className="text-xs text-slate-500 mb-2">Orders will be sent to this email address</p>
+                              <input
+                                 type="email"
+                                 value={profile.emailOrderSettings?.deliveryEmail || ''}
+                                 onChange={(e) => {
+                                    const updated = {
+                                       ...profile,
+                                       emailOrderSettings: {
+                                          ...profile.emailOrderSettings!,
+                                          deliveryEmail: e.target.value,
+                                       }
+                                    };
+                                    setProfile(updated);
+                                    saveProfile(updated);
+                                 }}
+                                 placeholder="restaurant@example.com"
+                                 className="w-full p-3 border border-slate-200 rounded-lg bg-white text-slate-900"
+                              />
+                           </div>
+
+                           <div>
+                              <label className="text-xs font-semibold text-slate-500 uppercase mb-2 block">Enabled Order Types</label>
+                              <div className="space-y-2 mt-3">
+                                 <label className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg cursor-pointer hover:bg-slate-100">
+                                    <input
+                                       type="checkbox"
+                                       checked={profile.emailOrderSettings?.enableDineIn || false}
+                                       onChange={(e) => {
+                                          const updated = {
+                                             ...profile,
+                                             emailOrderSettings: {
+                                                ...profile.emailOrderSettings!,
+                                                enableDineIn: e.target.checked,
+                                             }
+                                          };
+                                          setProfile(updated);
+                                          saveProfile(updated);
+                                       }}
+                                       className="w-4 h-4"
+                                    />
+                                    <span className="text-sm font-medium text-slate-700">Dine-In Orders</span>
+                                 </label>
+                                 <label className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg cursor-pointer hover:bg-slate-100">
+                                    <input
+                                       type="checkbox"
+                                       checked={profile.emailOrderSettings?.enablePickup || false}
+                                       onChange={(e) => {
+                                          const updated = {
+                                             ...profile,
+                                             emailOrderSettings: {
+                                                ...profile.emailOrderSettings!,
+                                                enablePickup: e.target.checked,
+                                             }
+                                          };
+                                          setProfile(updated);
+                                          saveProfile(updated);
+                                       }}
+                                       className="w-4 h-4"
+                                    />
+                                    <span className="text-sm font-medium text-slate-700">Pickup Orders</span>
+                                 </label>
+                                 <label className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg cursor-pointer hover:bg-slate-100">
+                                    <input
+                                       type="checkbox"
+                                       checked={profile.emailOrderSettings?.enableDelivery || false}
+                                       onChange={(e) => {
+                                          const updated = {
+                                             ...profile,
+                                             emailOrderSettings: {
+                                                ...profile.emailOrderSettings!,
+                                                enableDelivery: e.target.checked,
+                                             }
+                                          };
+                                          setProfile(updated);
+                                          saveProfile(updated);
+                                       }}
+                                       className="w-4 h-4"
+                                    />
+                                    <span className="text-sm font-medium text-slate-700">Delivery Orders</span>
+                                 </label>
+                              </div>
+                           </div>
+                        </div>
+                     </div>
+                  )}
+
+                  {profile.orderHandlingMode === 'GLORIA_FOOD' && (
+                     <div className="bg-white p-6 rounded-xl border border-slate-200 mb-6">
+                        <h4 className="font-bold text-slate-800 mb-4 flex items-center gap-2">
+                           <ShoppingBag className="w-5 h-5 text-slate-500" /> GloriaFood Settings
+                        </h4>
+                        <p className="text-sm text-slate-500 mb-4">
+                           Manage your GloriaFood integration in the <button onClick={() => setSettingsTab('APPS')} className="text-brand-600 font-semibold hover:underline">Connected Apps</button> tab.
+                        </p>
+                        {profile.gloriaFoodsToken ? (
+                           <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 p-3 rounded-lg">
+                              <Check className="w-4 h-4" />
+                              GloriaFood API connected
+                           </div>
+                        ) : (
+                           <div className="flex items-center gap-2 text-sm text-orange-700 bg-orange-50 p-3 rounded-lg">
+                              <AlertTriangle className="w-4 h-4" />
+                              GloriaFood API not configured. Visit Connected Apps to set up.
+                           </div>
+                        )}
+                     </div>
+                  )}
+
+                  {/* Switch Path Section */}
+                  <div className="bg-slate-50 p-6 rounded-xl border border-slate-200">
+                     <h4 className="font-bold text-slate-800 mb-3">Switch Order Handling Mode</h4>
+                     <p className="text-sm text-slate-500 mb-4">
+                        Change how your restaurant processes orders. Your data will be preserved when switching.
+                     </p>
+
+                     <button
+                        onClick={() => {
+                           const newMode = profile.orderHandlingMode === 'EMAIL_ONLY' ? 'GLORIA_FOOD' : 'EMAIL_ONLY';
+                           setTargetPath(newMode);
+                           setShowPathSwitchModal(true);
+                        }}
+                        className={`px-6 py-3 rounded-lg font-bold text-white transition-all hover:shadow-lg flex items-center gap-2 ${
+                          profile.orderHandlingMode === 'EMAIL_ONLY'
+                            ? 'bg-orange-600 hover:bg-orange-700'
+                            : 'bg-green-600 hover:bg-green-700'
+                        }`}
+                     >
+                        {profile.orderHandlingMode === 'EMAIL_ONLY' ? (
+                           <>
+                              <ShoppingBag className="w-5 h-5" />
+                              Switch to GloriaFood Mode
+                           </>
+                        ) : (
+                           <>
+                              <Mail className="w-5 h-5" />
+                              Switch to Email-Only Mode
+                           </>
+                        )}
+                     </button>
+                  </div>
+               </div>
+             )}
+
           </div>
        </div>
+
+       {/* Path Switching Modal */}
+       {showPathSwitchModal && (
+          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+             <div className="bg-white rounded-2xl w-full max-w-2xl shadow-2xl p-8 animate-in zoom-in-95">
+                <div className="flex justify-between items-start mb-6">
+                   <div>
+                      <h3 className="text-2xl font-bold text-slate-900 mb-2">Switch Order Handling Mode</h3>
+                      <p className="text-sm text-slate-500">
+                         {targetPath === 'EMAIL_ONLY'
+                            ? 'Switch from GloriaFood to Email-Only mode'
+                            : 'Switch from Email-Only to GloriaFood mode'}
+                      </p>
+                   </div>
+                   <button
+                      onClick={() => setShowPathSwitchModal(false)}
+                      className="text-slate-400 hover:text-slate-600"
+                   >
+                      <X className="w-6 h-6" />
+                   </button>
+                </div>
+
+                {/* Mode Preview */}
+                <div className={`p-6 rounded-xl border-2 mb-6 ${
+                   targetPath === 'EMAIL_ONLY'
+                      ? 'bg-green-50 border-green-200'
+                      : 'bg-orange-50 border-orange-200'
+                }`}>
+                   {targetPath === 'EMAIL_ONLY' ? (
+                      <div className="flex items-start gap-3">
+                         <Mail className="w-6 h-6 text-green-600 flex-shrink-0 mt-0.5" />
+                         <div>
+                            <h4 className="font-bold text-green-900 mb-2">Switching to Email-Only Mode</h4>
+                            <p className="text-sm text-green-700 mb-3">
+                               Orders will be sent to your email address. No payment processing or POS integration.
+                            </p>
+                            <ul className="text-sm text-green-700 space-y-1">
+                               <li>✓ Simpler setup and operation</li>
+                               <li>✓ No payment processing fees</li>
+                               <li>✓ Your GloriaFood data will be preserved</li>
+                               <li>✓ You can switch back anytime</li>
+                            </ul>
+                         </div>
+                      </div>
+                   ) : (
+                      <div className="flex items-start gap-3">
+                         <ShoppingBag className="w-6 h-6 text-orange-600 flex-shrink-0 mt-0.5" />
+                         <div>
+                            <h4 className="font-bold text-orange-900 mb-2">Switching to GloriaFood Mode</h4>
+                            <p className="text-sm text-orange-700 mb-3">
+                               Full POS integration with online payments and menu synchronization.
+                            </p>
+                            <ul className="text-sm text-orange-700 space-y-1">
+                               <li>✓ Automatic menu sync from GloriaFood</li>
+                               <li>✓ Online payment processing</li>
+                               <li>✓ Advanced order management</li>
+                               <li>✓ Requires GloriaFood API credentials</li>
+                            </ul>
+                         </div>
+                      </div>
+                   )}
+                </div>
+
+                {/* Warnings & Requirements */}
+                {targetPath === 'GLORIA_FOOD' && !profile.gloriaFoodsToken && (
+                   <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 mb-6 flex items-start gap-3">
+                      <AlertTriangle className="w-5 h-5 text-orange-600 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                         <h5 className="font-bold text-orange-900 mb-1">GloriaFood API Required</h5>
+                         <p className="text-sm text-orange-700 mb-3">
+                            You'll need to configure your GloriaFood API credentials in the Connected Apps settings before using this mode.
+                         </p>
+                         <button
+                            onClick={() => {
+                               setShowPathSwitchModal(false);
+                               setSettingsTab('APPS');
+                            }}
+                            className="text-sm font-semibold text-orange-700 hover:text-orange-800 underline"
+                         >
+                            Go to Connected Apps →
+                         </button>
+                      </div>
+                   </div>
+                )}
+
+                {targetPath === 'EMAIL_ONLY' && !profile.emailOrderSettings?.deliveryEmail && (
+                   <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-6 flex items-start gap-3">
+                      <Mail className="w-5 h-5 text-blue-600 flex-shrink-0 mt-0.5" />
+                      <div className="flex-1">
+                         <h5 className="font-bold text-blue-900 mb-2">Email Address Required</h5>
+                         <p className="text-sm text-blue-700 mb-2">
+                            Please enter the email address where you'd like to receive orders:
+                         </p>
+                         <input
+                            type="email"
+                            value={profile.emailOrderSettings?.deliveryEmail || profile.ownerEmail || ''}
+                            onChange={(e) => {
+                               setProfile(p => ({
+                                  ...p,
+                                  emailOrderSettings: {
+                                     ...p.emailOrderSettings!,
+                                     deliveryEmail: e.target.value,
+                                  }
+                               }));
+                            }}
+                            placeholder="restaurant@example.com"
+                            className="w-full p-3 border border-blue-200 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-blue-500"
+                         />
+                      </div>
+                   </div>
+                )}
+
+                {/* Data Preservation Notice */}
+                <div className="bg-slate-50 border border-slate-200 rounded-lg p-4 mb-6">
+                   <div className="flex items-start gap-2">
+                      <Check className="w-5 h-5 text-slate-600 flex-shrink-0 mt-0.5" />
+                      <div>
+                         <h5 className="font-semibold text-slate-900 mb-1">Your Data is Safe</h5>
+                         <p className="text-sm text-slate-600">
+                            All your settings and data will be preserved when switching modes. You can switch back anytime without losing any configuration.
+                         </p>
+                      </div>
+                   </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex gap-3 justify-end">
+                   <button
+                      onClick={() => setShowPathSwitchModal(false)}
+                      className="px-6 py-3 rounded-lg font-medium text-slate-600 hover:bg-slate-100 transition"
+                   >
+                      Cancel
+                   </button>
+                   <button
+                      onClick={async () => {
+                         // Validate requirements before switching
+                         if (targetPath === 'EMAIL_ONLY' && !profile.emailOrderSettings?.deliveryEmail) {
+                            alert('Please enter an email address to receive orders.');
+                            return;
+                         }
+
+                         // Perform the switch
+                         const updated = {
+                            ...profile,
+                            orderHandlingMode: targetPath,
+                            // Initialize email settings if switching to EMAIL_ONLY and not set
+                            emailOrderSettings: targetPath === 'EMAIL_ONLY' ? {
+                               deliveryEmail: profile.emailOrderSettings?.deliveryEmail || profile.ownerEmail || '',
+                               enableDineIn: profile.emailOrderSettings?.enableDineIn ?? true,
+                               enablePickup: profile.emailOrderSettings?.enablePickup ?? true,
+                               enableDelivery: profile.emailOrderSettings?.enableDelivery ?? true,
+                            } : profile.emailOrderSettings,
+                         };
+
+                         setProfile(updated);
+                         await saveProfile(updated);
+                         setShowPathSwitchModal(false);
+
+                         // Show success message
+                         alert(`Successfully switched to ${targetPath === 'EMAIL_ONLY' ? 'Email-Only' : 'GloriaFood'} mode!`);
+                      }}
+                      disabled={targetPath === 'GLORIA_FOOD' && !profile.gloriaFoodsToken}
+                      className={`px-6 py-3 rounded-lg font-bold text-white transition-all hover:shadow-lg flex items-center gap-2 ${
+                         targetPath === 'EMAIL_ONLY'
+                            ? 'bg-green-600 hover:bg-green-700 disabled:bg-slate-300'
+                            : 'bg-orange-600 hover:bg-orange-700 disabled:bg-slate-300'
+                      } disabled:cursor-not-allowed`}
+                   >
+                      {targetPath === 'EMAIL_ONLY' ? (
+                         <>
+                            <Mail className="w-5 h-5" />
+                            Switch to Email-Only
+                         </>
+                      ) : (
+                         <>
+                            <ShoppingBag className="w-5 h-5" />
+                            Switch to GloriaFood
+                         </>
+                      )}
+                   </button>
+                </div>
+             </div>
+          </div>
+       )}
     </div>
   );
 
@@ -3491,6 +4320,7 @@ ${orderInstructions}
 
              <nav className="flex-1 p-6 space-y-1 overflow-y-auto">
                {[
+                 { id: 0, label: 'Choose Path' },
                  { id: 1, label: 'Upload Menu' },
                  { id: 2, label: 'Sync Profile' },
                  { id: 3, label: 'Integrations' },
@@ -3541,6 +4371,7 @@ ${orderInstructions}
           <div className="flex-1 relative overflow-y-auto bg-slate-50">
             <div className="max-w-6xl mx-auto py-12 px-8 h-full">
               <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-10 md:p-14 transition-all animate-in fade-in slide-in-from-bottom-4 duration-500 min-h-[600px] flex flex-col">
+                {step === 0 && renderStep0_PathSelection()}
                 {step === 1 && renderStep1_Menu()}
                 {step === 2 && renderStep2_Google()}
                 {step === 3 && renderStep3_Integrations()}

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import QRCode from 'react-qr-code';
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from 'recharts';
-import { Phone, ExternalLink, Settings, Play, StopCircle, Mic, MonitorPlay, MessageSquare } from 'lucide-react';
+import { Phone, ExternalLink, Settings, Play, StopCircle, Mic, MonitorPlay, MessageSquare, Mail, ShoppingBag } from 'lucide-react';
 import { RestaurantProfile } from '../types';
 import { geminiService } from '../services/geminiService';
 
@@ -90,6 +90,21 @@ export const Dashboard: React.FC<DashboardProps> = ({ profile, onDeploy, onTextC
           <p className="text-slate-500">Welcome back, {profile.info.name}</p>
         </div>
         <div className="flex items-center gap-4">
+          <div className={`px-3 py-1 rounded-full text-xs font-bold ${
+            profile.orderHandlingMode === 'EMAIL_ONLY'
+              ? 'bg-green-100 text-green-700'
+              : 'bg-orange-100 text-orange-700'
+          }`}>
+            {profile.orderHandlingMode === 'EMAIL_ONLY' ? (
+              <span className="flex items-center gap-1.5">
+                <Mail className="w-3.5 h-3.5" /> Email Orders
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5">
+                <ShoppingBag className="w-3.5 h-3.5" /> GloriaFood
+              </span>
+            )}
+          </div>
           <div className="bg-green-100 text-green-700 px-3 py-1 rounded-full text-sm font-medium flex items-center gap-2">
             <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
             Voice Bot Active
