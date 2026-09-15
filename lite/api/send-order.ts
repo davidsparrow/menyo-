@@ -5,6 +5,9 @@
  * Mail and Messages apps. Deploy this endpoint only if you want a submitted
  * order to reach the restaurant without anyone tapping "Send".
  *
+ * It lives inside lite/ so the folder deploys as one self-contained Vercel
+ * project (Root Directory: lite), served at /api/send-order.
+ *
  * Environment variables:
  *   LITE_RELAY_TOKEN     required — shared secret; must match the relay token in Admin
  *   LITE_ORDER_EMAIL     the restaurant address that receives orders
@@ -19,7 +22,7 @@
  * relay URL therefore cannot be turned into an open mail or SMS gateway.
  */
 import type { VercelRequest, VercelResponse } from '@vercel/node';
-import { orderToHtml, orderToText, orderToSms, emailSubject } from '../../lite/js/order.js';
+import { orderToHtml, orderToText, orderToSms, emailSubject } from '../js/order.js';
 
 type LiteOrderLine = {
   name: string;

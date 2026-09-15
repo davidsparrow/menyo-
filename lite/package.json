@@ -1,0 +1,15 @@
+{
+  "name": "menyo-lite",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Standalone iPad ordering page: read a menu, take an order, email or text it to the restaurant.",
+  "scripts": {
+    "serve": "npx --yes http-server . -p 8787 -c-1",
+    "build": "node tools/build-single-file.mjs",
+    "test": "node tools/test-qr.mjs && node tools/test-order.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
+  }
+}

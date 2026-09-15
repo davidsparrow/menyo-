@@ -51,6 +51,14 @@ npx vercel deploy lite --prod
 npx http-server lite
 ```
 
+`lite/` is a complete Vercel project on its own — its own `package.json` and
+`vercel.json`, and the optional relay at `lite/api/send-order.ts`. Point a
+**second Vercel project** at this repo with **Root Directory: `lite`** and the
+kiosk gets its own URL, its own environment variables and its own deploy
+cadence, untouched by deploys of the main menyo app. Nothing about the main
+app's build reaches it, and none of its Supabase or GloriaFood secrets are in
+its environment.
+
 Then on the iPad:
 
 1. Open the address in **Safari** — not inside another app's browser.
@@ -172,7 +180,7 @@ message is kept lean so the link is the only long part.
 
 ## The optional relay
 
-`api/lite/send-order.ts` is a Vercel function that sends the email (via Resend)
+`lite/api/send-order.ts` is a Vercel function that sends the email (via Resend)
 and the SMS (via Twilio) so nobody has to tap send.
 
 ```
@@ -211,6 +219,9 @@ lite/
   sw.js                   offline cache for the app shell
   manifest.webmanifest    home-screen install metadata
   sample-menu.json        a demo restaurant
+  api/send-order.ts       optional relay that sends the email and SMS for you
+  package.json            standalone project manifest (esbuild, for the single-file build)
+  vercel.json             deploy config for a lite-rooted Vercel project
   tools/build-single-file.mjs   the AirDroppable build
   tools/test-qr.mjs             decodes generated QR symbols and checks them
   tools/test-order.mjs          order maths and share-link round trips

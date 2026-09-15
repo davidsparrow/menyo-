@@ -70,6 +70,10 @@ npm run lite:build      # bundle it into one AirDroppable HTML file
 npm run lite:test       # order maths and QR self-tests
 ```
 
+It is a complete Vercel project on its own: deploy it as a **second project with
+Root Directory `lite`** so the kiosk gets its own URL and environment, separate
+from this app's. Deploys of the main app do not touch it.
+
 See [lite/README.md](lite/README.md) for setup, iPad install and the optional
 email/SMS relay.
 

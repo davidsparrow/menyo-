@@ -522,14 +522,14 @@ function sendingPanel() {
         <label class="choice">
           <input type="radio" name="method" value="RELAY" ${d.method === 'RELAY' ? raw('checked') : raw('')}>
           <span class="choice-name">Automatically, through a relay
-            <span class="switch-sub">One tap sends the email and text without opening another app. Needs the endpoint in api/lite/send-order.ts deployed.</span>
+            <span class="switch-sub">One tap sends the email and text without opening another app. Needs the endpoint in lite/api/send-order.ts deployed.</span>
           </span>
         </label>
 
         <div class="divider"></div>
         <label class="field">
           <span class="label">Relay URL</span>
-          <input class="input" name="relayUrl" inputmode="url" value="${d.relayUrl}" placeholder="https://your-app.vercel.app/api/lite/send-order">
+          <input class="input" name="relayUrl" inputmode="url" value="${d.relayUrl}" placeholder="https://your-kiosk.vercel.app/api/send-order">
         </label>
         <label class="field">
           <span class="label">Relay token</span>
