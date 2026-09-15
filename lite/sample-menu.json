@@ -1,0 +1,221 @@
+{
+  "restaurant": {
+    "name": "Bramble & Oak",
+    "tagline": "Wood-fired plates, natural wine, no fuss",
+    "address": "184 Halsey Street, Brooklyn NY",
+    "phone": "+1 555 010 0184",
+    "website": "brambleandoak.example"
+  },
+  "menu": {
+    "name": "Bramble & Oak",
+    "currency": "USD",
+    "categories": [
+      {
+        "name": "Small plates",
+        "description": "Made to share, brought out as they're ready.",
+        "items": [
+          {
+            "name": "Wood-fired focaccia",
+            "description": "Rosemary, sea salt, cultured butter.",
+            "price": 900,
+            "tags": ["vegetarian"],
+            "available": true,
+            "options": []
+          },
+          {
+            "name": "Charred broccolini",
+            "description": "Chilli, garlic, lemon, toasted almonds.",
+            "price": 1400,
+            "tags": ["vegan", "spicy"],
+            "available": true,
+            "options": []
+          },
+          {
+            "name": "Burrata & peaches",
+            "description": "Grilled stone fruit, basil oil, aged balsamic.",
+            "price": 1800,
+            "tags": ["vegetarian"],
+            "available": true,
+            "options": []
+          },
+          {
+            "name": "Crispy artichokes",
+            "description": "Fried until they shatter, with a lemon aioli.",
+            "price": 1300,
+            "tags": ["vegetarian"],
+            "available": true,
+            "options": []
+          }
+        ]
+      },
+      {
+        "name": "From the oven",
+        "items": [
+          {
+            "name": "Margherita",
+            "description": "San Marzano, fior di latte, basil.",
+            "price": 1700,
+            "tags": ["vegetarian"],
+            "available": true,
+            "options": [
+              {
+                "name": "Size",
+                "required": true,
+                "multiple": false,
+                "choices": [
+                  { "name": "12 inch", "price": 0 },
+                  { "name": "16 inch", "price": 600 }
+                ]
+              },
+              {
+                "name": "Add to it",
+                "required": false,
+                "multiple": true,
+                "choices": [
+                  { "name": "Nduja", "price": 400 },
+                  { "name": "Hot honey", "price": 200 },
+                  { "name": "Extra mozzarella", "price": 300 }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "Mushroom & taleggio",
+            "description": "Wild mushrooms, taleggio, thyme, garlic cream.",
+            "price": 2100,
+            "tags": ["vegetarian"],
+            "available": true,
+            "options": [
+              {
+                "name": "Size",
+                "required": true,
+                "multiple": false,
+                "choices": [
+                  { "name": "12 inch", "price": 0 },
+                  { "name": "16 inch", "price": 600 }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "Whole branzino",
+            "description": "Salt-baked, fennel, charred lemon, olive oil.",
+            "price": 3400,
+            "tags": [],
+            "available": true,
+            "options": []
+          },
+          {
+            "name": "Dry-aged ribeye",
+            "description": "For two. Bone marrow butter, watercress.",
+            "price": 7800,
+            "tags": [],
+            "available": true,
+            "options": [
+              {
+                "name": "Cooked",
+                "required": true,
+                "multiple": false,
+                "choices": [
+                  { "name": "Rare", "price": 0 },
+                  { "name": "Medium rare", "price": 0 },
+                  { "name": "Medium", "price": 0 },
+                  { "name": "Well done", "price": 0 }
+                ]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Sides",
+        "items": [
+          {
+            "name": "Hand-cut chips",
+            "description": "Rosemary salt, garlic mayo.",
+            "price": 800,
+            "tags": ["vegetarian"],
+            "available": true,
+            "options": []
+          },
+          {
+            "name": "Little gem salad",
+            "description": "Buttermilk dressing, dill, cucumber.",
+            "price": 1000,
+            "tags": ["vegetarian", "gluten-free"],
+            "available": true,
+            "options": []
+          }
+        ]
+      },
+      {
+        "name": "Desserts",
+        "items": [
+          {
+            "name": "Olive oil cake",
+            "description": "Whipped mascarpone, macerated berries.",
+            "price": 1100,
+            "tags": ["vegetarian"],
+            "available": true,
+            "options": []
+          },
+          {
+            "name": "Affogato",
+            "description": "Vanilla gelato, double espresso.",
+            "price": 900,
+            "tags": ["vegetarian", "gluten-free"],
+            "available": true,
+            "options": [
+              {
+                "name": "Make it a corretto",
+                "required": false,
+                "multiple": false,
+                "choices": [{ "name": "Add amaretto", "price": 500 }]
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "name": "Drinks",
+        "items": [
+          {
+            "name": "Natural wine, by the glass",
+            "description": "Ask the floor for today's pour.",
+            "price": 1400,
+            "tags": [],
+            "available": true,
+            "options": [
+              {
+                "name": "Style",
+                "required": true,
+                "multiple": false,
+                "choices": [
+                  { "name": "Skin contact", "price": 0 },
+                  { "name": "Light red", "price": 0 },
+                  { "name": "Pét-nat", "price": 200 }
+                ]
+              }
+            ]
+          },
+          {
+            "name": "House lemonade",
+            "description": "Meyer lemon, rosemary, soda.",
+            "price": 700,
+            "tags": ["vegan", "gluten-free"],
+            "available": true,
+            "options": []
+          },
+          {
+            "name": "Espresso",
+            "price": 400,
+            "description": "",
+            "tags": ["vegan"],
+            "available": true,
+            "options": []
+          }
+        ]
+      }
+    ]
+  }
+}
