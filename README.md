@@ -56,6 +56,27 @@ This contains everything you need to run your app locally and deploy to Vercel.
 3. Add all environment variables from `.env.local` to Vercel project settings
 4. Deploy!
 
+## menyo lite (iPad, no integrations)
+
+`lite/` holds a separate, stripped-down ordering app: it reads an uploaded menu,
+shows a food-ordering page guests can sign in to and submit from, then emails or
+texts the finished order to the restaurant. No GloriaFood, no POS, no payment
+and no database — it installs on an iPad as a home-screen web app and keeps
+working offline.
+
+```bash
+npm run lite:serve      # run it locally
+npm run lite:build      # bundle it into one AirDroppable HTML file
+npm run lite:test       # order maths and QR self-tests
+```
+
+It is a complete Vercel project on its own: deploy it as a **second project with
+Root Directory `lite`** so the kiosk gets its own URL and environment, separate
+from this app's. Deploys of the main app do not touch it.
+
+See [lite/README.md](lite/README.md) for setup, iPad install and the optional
+email/SMS relay.
+
 ## Features
 
 - **User Authentication**: Supabase Auth with automatic profile creation
