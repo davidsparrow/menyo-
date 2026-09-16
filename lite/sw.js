@@ -6,7 +6,7 @@
  *
  * Bump CACHE whenever a shell file changes so iPads pick up the new version.
  */
-const CACHE = 'menyo-lite-v1';
+const CACHE = 'menyo-lite-v2';
 
 const SHELL = [
   'index.html',
@@ -17,6 +17,7 @@ const SHELL = [
   'js/order.js',
   'js/share.js',
   'js/menu-ai.js',
+  'js/menu-quality.js',
   'js/qr.js',
   'js/ui.js',
   'js/util.js',

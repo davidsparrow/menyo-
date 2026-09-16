@@ -120,6 +120,48 @@ No key, or no signal? Paste the menu as text and use **Read pasted text without
 AI** — a rough line-by-line parser that you then tidy in the editor. Or edit the
 menu entirely by hand; the editor works on its own.
 
+#### When the photo does not read well
+
+Menus are printed to be read across a table, not by a camera, so a plain photo
+of one is often soft, shot at an angle, or missing the price column at the right
+edge. The dangerous case is not a failed read — it is a read that *looks* fine
+until you notice a third of the prices came back as zero.
+
+Every parse is scored before you can save it. Two kinds of evidence are used:
+the model reports how legible the pages were and what it could not make out, and
+the parsed result itself is checked for missing prices, garbled item names, the
+same dish appearing twice, prices far above the rest (a dropped decimal point),
+sections with no items, and too little coming back for the number of pages.
+
+The result decides what you are shown:
+
+| Verdict | What it means | What happens |
+| :--- | :--- | :--- |
+| Good | Nothing was flagged | Save it |
+| Check | Some rows need a look | The rows are named so you can fix them in the editor |
+| Poor | Retaking beats correcting | Advice opens automatically |
+
+The advice is ordered cheapest-first, and the first suggestion is the document
+scanner already built into the iPad — **Files → ⋯ → Scan Documents**, or
+**Notes → camera → Scan Documents** — which straightens the page, removes the
+angle and lifts the contrast far better than a photo. An online OCR tool or a
+print shop is offered last, only when very little was readable. There is also a
+**This came out wrong** button, because you can see the menu and the app cannot.
+
+#### Checking a photo from a terminal
+
+Faster than tapping through the iPad while you work out which photos parse:
+
+```bash
+GEMINI_API_KEY=... node lite/tools/try-menu-photo.mjs menu-page-1.jpg menu-page-2.jpg
+```
+
+It runs the same ingestion path the app uses and prints every item it read, the
+quality verdict and score, the model's own report on the pages, and what to try
+next. Add `--json` to capture the parsed menu, which you can then import through
+**Move the menu around → Import menu JSON**. It exits non-zero on a poor read,
+so it also works in a script.
+
 ### 3. Ordering
 
 Which services you offer (dine in / pickup / delivery), whether to ask for a
@@ -212,6 +254,7 @@ lite/
   js/store.js             state and localStorage
   js/order.js             cart maths, share-link encoding, email/SMS/CSV rendering
   js/menu-ai.js           Gemini menu ingestion + an offline text fallback
+  js/menu-quality.js      scores a parse and decides whether to ask for a better photo
   js/share.js             mailto / sms / Web Share / relay delivery
   js/qr.js                QR encoder (no dependencies, works offline)
   js/ui.js                toasts and modal sheets
@@ -225,12 +268,14 @@ lite/
   tools/build-single-file.mjs   the AirDroppable build
   tools/test-qr.mjs             decodes generated QR symbols and checks them
   tools/test-order.mjs          order maths and share-link round trips
+  tools/test-menu-quality.mjs   the photo-quality verdict, per failure mode
+  tools/try-menu-photo.mjs      run a real photo through ingestion from a terminal
 ```
 
 No framework and no build step: the browser loads the ES modules as they are.
 
 ```bash
-npm run lite:test       # 232 checks, no browser needed
+npm run lite:test       # 251 checks, no browser needed
 ```
 
 ---

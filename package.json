@@ -9,7 +9,7 @@
     "preview": "vite preview",
     "lite:serve": "npx --yes http-server lite -p 8787 -c-1",
     "lite:build": "node lite/tools/build-single-file.mjs",
-    "lite:test": "node lite/tools/test-qr.mjs && node lite/tools/test-order.mjs"
+    "lite:test": "node lite/tools/test-qr.mjs && node lite/tools/test-order.mjs && node lite/tools/test-menu-quality.mjs"
   },
   "dependencies": {
     "@google/genai": "^1.31.0",

@@ -20,6 +20,18 @@ const RESPONSE_SCHEMA = {
   properties: {
     restaurantName: { type: 'STRING' },
     currency: { type: 'STRING' },
+    // The model's own account of how readable the pages were. Owners
+    // photograph a physical menu, so this is often the difference between "the
+    // menu has 12 dishes" and "I could only make out 12 of them".
+    pageQuality: {
+      type: 'OBJECT',
+      properties: {
+        legible: { type: 'BOOLEAN' },
+        confidence: { type: 'NUMBER' },
+        issues: { type: 'ARRAY', items: { type: 'STRING' } },
+        unreadableAreas: { type: 'STRING' },
+      },
+    },
     categories: {
       type: 'ARRAY',
       items: {
@@ -80,7 +92,13 @@ Rules:
 - "tags" holds only dietary or allergen markers actually printed on the menu, lowercased and short: "vegetarian", "vegan", "gluten-free", "spicy", "contains nuts".
 - Only create an option group when the menu really offers a choice (size, protein, side, cooking temperature). Mark it required when the customer must choose.
 - Do not invent items, prices, or sections. Skip decorative text, opening hours, addresses and marketing copy.
-- If a price is genuinely unreadable, use 0 so a human can correct it later.`;
+- If a price is genuinely unreadable, use 0 so a human can correct it later. Never guess a price from the items around it.
+
+These are usually photographs of a physical menu taken on a tablet, so also fill in "pageQuality" honestly — it decides whether the owner is asked to retake the photo:
+- "legible": false if you had to strain to read a meaningful part of the page.
+- "confidence": 0 to 1, how much of the menu you are sure you captured correctly. Be strict. If a column runs off the edge of the photo, or the text is too soft to read cleanly, say so with a low number rather than a high one.
+- "issues": short lowercase tags for what was wrong with the photograph itself, from: "blurry", "cropped", "angled", "glare", "low resolution", "shadow", "creased", "handwritten", "low contrast". Leave it empty when the page was clean.
+- "unreadableAreas": one short sentence naming what you could not make out, for example "the right-hand price column of the second page". Leave empty when nothing was lost.`;
 
 function schemaFromText(text) {
   return `${PROMPT}\n\nThe menu content is the following text:\n\n"""\n${text}\n"""`;
@@ -163,11 +181,44 @@ function toStoredMenu(parsed, fallbackCurrency) {
   };
 }
 
+/** Assemble the request parts for a set of already-decoded pages. */
+export function buildPromptParts({ pages = [], text = '' }) {
+  const parts = pages.map((page) => ({
+    inline_data: { mime_type: page.mimeType, data: page.base64 },
+  }));
+  parts.push({ text: pages.length ? PROMPT : schemaFromText(text) });
+  if (pages.length && text.trim()) {
+    parts.push({ text: `Additional notes from the owner:\n${text.trim()}` });
+  }
+  return parts;
+}
+
+/**
+ * The network half of menu ingestion, with no dependency on the DOM, so the
+ * exact path the app uses can also be exercised from a script — see
+ * lite/tools/try-menu-photo.mjs.
+ *
+ * @param {{pages?: Array<{base64: string, mimeType: string}>, text?: string,
+ *          apiKey: string, model?: string, currency?: string}} input
+ * @returns {Promise<{menu: object, pageReport: object|null}>}
+ */
+export async function parseMenuPages({ pages = [], text = '', apiKey, model = 'gemini-2.5-flash', currency }) {
+  if (!apiKey) throw new Error('Add a Gemini API key in Admin → Menu before uploading a menu.');
+  if (!pages.length && !text.trim()) throw new Error('Choose a menu file or paste the menu text first.');
+
+  const parsed = await callGemini({ apiKey, model, parts: buildPromptParts({ pages, text }) });
+  const menu = toStoredMenu(parsed, currency);
+  if (!menu.categories.some((c) => c.items.length)) {
+    throw new Error('No menu items could be read from that file. Try a clearer photo or paste the text.');
+  }
+  return { menu, pageReport: parsed.pageQuality || null };
+}
+
 /**
  * @param {{files?: File[], text?: string, apiKey: string, model?: string, currency?: string}} input
+ * @returns {Promise<{menu: object, pageReport: object|null}>}
  */
 export async function parseMenu({ files = [], text = '', apiKey, model = 'gemini-2.5-flash', currency }) {
-  if (!apiKey) throw new Error('Add a Gemini API key in Admin → Menu before uploading a menu.');
   if (!files.length && !text.trim()) throw new Error('Choose a menu file or paste the menu text first.');
 
   const totalBytes = files.reduce((sum, file) => sum + file.size, 0);
@@ -175,22 +226,9 @@ export async function parseMenu({ files = [], text = '', apiKey, model = 'gemini
     throw new Error('Those files add up to more than 15MB. Upload the pages in smaller batches.');
   }
 
-  const parts = [];
-  for (const file of files) {
-    const { base64, mimeType } = await readAsBase64(file);
-    parts.push({ inline_data: { mime_type: mimeType, data: base64 } });
-  }
-  parts.push({ text: files.length ? PROMPT : schemaFromText(text) });
-  if (files.length && text.trim()) {
-    parts.push({ text: `Additional notes from the owner:\n${text.trim()}` });
-  }
-
-  const parsed = await callGemini({ apiKey, model, parts });
-  const menu = toStoredMenu(parsed, currency);
-  if (!menu.categories.some((c) => c.items.length)) {
-    throw new Error('No menu items could be read from that file. Try a clearer photo or paste the text.');
-  }
-  return menu;
+  const pages = [];
+  for (const file of files) pages.push(await readAsBase64(file));
+  return parseMenuPages({ pages, text, apiKey, model, currency });
 }
 
 function readAsBase64(file) {

@@ -7,7 +7,7 @@
   "scripts": {
     "serve": "npx --yes http-server . -p 8787 -c-1",
     "build": "node tools/build-single-file.mjs",
-    "test": "node tools/test-qr.mjs && node tools/test-order.mjs"
+    "test": "node tools/test-qr.mjs && node tools/test-order.mjs && node tools/test-menu-quality.mjs"
   },
   "devDependencies": {
     "esbuild": "^0.25.0"

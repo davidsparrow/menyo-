@@ -18,6 +18,7 @@ import {
   menuIsEmpty,
 } from './store.js';
 import { parseMenu, parseMenuTextLocally, SUPPORTED_TYPES } from './menu-ai.js';
+import { assessMenuQuality, qualitySummary, VERDICTS } from './menu-quality.js';
 import { toast, openSheet, closeActiveSheet, confirmSheet } from './ui.js';
 import { buildOrder, encodeOrder, shareUrl } from './order.js';
 import { deliveryOptions, mailtoUrl, smsUrl, sendViaRelay } from './share.js';
@@ -37,6 +38,9 @@ let unlocked = false;
 let draft = null;
 let draftDirty = false;
 let pendingFiles = [];
+
+/** Quality verdict on the most recent parse, for the "this came out wrong" button. */
+let lastAssessment = null;
 
 export function adminNeedsUnlock() {
   return Boolean(state.config.admin.pin) && !unlocked;
@@ -887,8 +891,8 @@ async function runParse(scope, button, localOnly) {
   setStatus('');
 
   try {
-    const parsed = localOnly
-      ? parseMenuTextLocally(text, state.config.ordering.currency)
+    const result = localOnly
+      ? { menu: parseMenuTextLocally(text, state.config.ordering.currency), pageReport: null }
       : await parseMenu({
           files: pendingFiles,
           text,
@@ -897,19 +901,33 @@ async function runParse(scope, button, localOnly) {
           currency: state.config.ordering.currency,
         });
 
-    const incoming = normaliseMenu(parsed);
+    const incoming = normaliseMenu(result.menu);
     const itemCount = incoming.categories.reduce((sum, c) => sum + c.items.length, 0);
     if (!itemCount) throw new Error('Nothing readable came back. Try a clearer photo, or paste the text.');
 
+    lastAssessment = assessMenuQuality(incoming, {
+      pageCount: pendingFiles.length || 1,
+      pageReport: result.pageReport,
+    });
+
     setStatus(h`
-      <div class="notice notice-ok" style="margin-top:14px;">
-        Read ${itemCount} ${itemCount === 1 ? 'item' : 'items'} across ${incoming.categories.length}
-        ${incoming.categories.length === 1 ? 'section' : 'sections'}. Check them below before saving.
-      </div>
+      ${raw(qualityReportHtml(lastAssessment))}
       <div class="row-actions">
-        <button class="btn btn-primary" id="apply-replace">Use this menu</button>
+        <button class="btn ${lastAssessment.verdict === VERDICTS.POOR ? 'btn-quiet' : 'btn-primary'}" id="apply-replace">Use this menu</button>
         <button class="btn btn-quiet" id="apply-append" ${menuIsEmpty() ? raw('disabled') : raw('')}>Add to the current menu</button>
+        ${lastAssessment.verdict === VERDICTS.GOOD ? raw('') : raw('<button class="btn btn-quiet" id="report-bad">This came out wrong</button>')}
       </div>`);
+
+    status.querySelector('#show-advice')?.addEventListener('click', () => showAdviceSheet(lastAssessment));
+    status.querySelector('#report-bad')?.addEventListener('click', () => {
+      // The owner can always override the verdict — they can see the menu and
+      // we cannot.
+      showAdviceSheet(lastAssessment, { forced: true });
+    });
+
+    // Only interrupt when the read is genuinely poor. A merely imperfect one
+    // shows the button and lets the owner decide.
+    if (lastAssessment.verdict === VERDICTS.POOR) showAdviceSheet(lastAssessment);
 
     status.querySelector('#apply-replace').addEventListener('click', () => {
       draft = incoming;
@@ -931,6 +949,77 @@ async function runParse(scope, button, localOnly) {
     button.disabled = false;
     button.textContent = original;
   }
+}
+
+/**
+ * What the parse produced and how much of it to trust. A photographed menu
+ * that reads badly is normal, so this leads with the specific rows to look at
+ * rather than a bare success message.
+ */
+function qualityReportHtml(assessment) {
+  const { verdict, problems, stats } = assessment;
+  const tone = verdict === VERDICTS.GOOD ? 'notice-ok' : verdict === VERDICTS.POOR ? 'notice-error' : '';
+
+  const rows = problems
+    .map((problem) => {
+      const examples = problem.examples?.length
+        ? h`<div class="muted small" style="margin-top:2px;">${problem.examples.join(', ')}${problem.count > problem.examples.length ? ', …' : ''}</div>`
+        : '';
+      return h`<li style="margin-bottom:8px;">${problem.label}${raw(examples)}</li>`;
+    })
+    .join('');
+
+  return h`
+    <div class="notice ${tone}" style="margin-top:14px;">
+      <strong>${qualitySummary(assessment)}</strong>
+      ${
+        problems.length
+          ? raw(h`<ul style="margin:10px 0 0;padding-left:20px;">${raw(rows)}</ul>`)
+          : raw('')
+      }
+      ${
+        verdict === VERDICTS.GOOD
+          ? raw('')
+          : raw(h`<div style="margin-top:12px;">
+              <button class="btn btn-sm btn-quiet" id="show-advice">How to get a better read</button>
+              <span class="muted small" style="margin-left:8px;">Photo quality ${stats.itemCount ? `${assessment.score}/100` : 'unreadable'}</span>
+            </div>`)
+      }
+    </div>`;
+}
+
+function showAdviceSheet(assessment, { forced = false } = {}) {
+  if (!assessment) return;
+  const steps = assessment.advice
+    .map(
+      (step, index) => h`
+      <div style="display:flex;gap:12px;margin-bottom:18px;">
+        <div class="brand-mark" style="width:28px;height:28px;border-radius:9px;font-size:14px;flex:none;">${index + 1}</div>
+        <div>
+          <div style="font-weight:700;">${step.title}</div>
+          <div class="muted small" style="margin-top:2px;">${step.detail}</div>
+        </div>
+      </div>`
+    )
+    .join('');
+
+  openSheet({
+    title: forced ? 'Getting a cleaner read' : 'This photo was hard to read',
+    subtitle: assessment.stats.itemCount
+      ? `${assessment.stats.itemCount} items read, ${assessment.stats.missingPrices} without a price`
+      : 'Nothing could be read from the upload',
+    body: h`
+      <p class="muted" style="margin-bottom:18px;">
+        Menus are printed to be read across a table, not by a camera. These fix almost
+        every bad read, in the order worth trying them.
+      </p>
+      ${raw(steps)}
+      <div class="notice" style="margin-top:4px;">
+        You can also keep what was read and correct the flagged rows by hand in the
+        menu editor below — that is often quickest when only a few prices are missing.
+      </div>`,
+    footer: '<button class="btn btn-primary btn-block" data-close>Got it</button>',
+  });
 }
 
 function renderFromDraft(scope) {
